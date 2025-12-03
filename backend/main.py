@@ -1,0 +1,50 @@
+import uuid
+import time
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+
+from src.agent import run_agent
+
+app = FastAPI(title='Lawbot-KR API')
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
+
+class ChatRequest(BaseModel):
+    question: str
+    session_id: str = None
+
+class ChatResponse(BaseModel):
+    answer: str
+    session_id: str
+
+@app.post('/chat')
+async def chat(request: ChatRequest):
+    session_id = request.session_id or str(uuid.uuid4())
+
+    start_time = time.time()
+
+    try:
+        answer = run_agent(request.question)
+        response_time = int((time.time() - start_time) * 1000)
+
+        return ChatResponse(
+            answer=answer,
+            session_id=session_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/')
+def root():
+    return {'status': 'ok', 'message': 'Lawbot-KR API'}
+
+@app.get('/health')
+def health():
+    return {'status': 'healthy'}
