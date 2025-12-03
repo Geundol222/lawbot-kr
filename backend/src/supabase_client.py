@@ -1,80 +1,48 @@
 import os
 from supabase import create_client, Client
 
-from config import SUPABASE_KEY, SUPABASE_URL
+from src.config import SUPABASE_KEY, SUPABASE_URL
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("❌ Supabase 환경변수가 설정되지 않았습니다!")
+
+print(f"✅ Supabase URL: {SUPABASE_URL[:30]}...")
+print(f"✅ Supabase KEY: {SUPABASE_KEY[:30]}...")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def save_converstion(session_id: str, user_question: str, bot_answer: str,
-                     law_name: str=None, article: str=None,
-                     response_time_ms: int=None):
+
+def save_conversation(session_id: str, user_question: str, bot_answer: str,
+                     law_name: str = None, article: str = None,
+                     response_time_ms: int = None):
     """대화 로그 저장"""
     try:
-        session = supabase.table('sessions')\
-            .select('*')\
-            .eq('session_id', session_id)\
+        # 세션 확인 또는 생성
+        session = supabase.table("sessions")\
+            .select("*")\
+            .eq("session_id", session_id)\
             .execute()
-
+        
         if not session.data:
-            supabase.table('sessions').insert({
-                'session_id': session_id
+            # 새 세션 생성
+            supabase.table("sessions").insert({
+                "session_id": session_id
             }).execute()
-
-        supabase.table('conversation_logs').insert({
-            'session_id': session_id,
-            'uswer_question': user_question,
-            'bot_answer': bot_answer,
-            'law_name': law_name,
-            'article': article,
-            'reaponse_time_me': response_time_ms
-        }).execute()
-
-        print(f'✅ 대화 저장 완료: {session_id}')
-
-    except Exception as e:
-        print(f'⚠️ 대화 저장 실패: {e}')
-
-
-def get_law_from_cache(law_name: str, article: str):
-    """캐시에서 법령 조회"""
-    try:
-        result = supabase.table('law_cache')\
-            .select('*')\
-            .eq('law_name', law_name)\
-            .eq('article', article)\
-            .execute()
         
-        if result.data:
-            # 히트 카운트 증가
-            supabase.rpc("increment_cache_hit", {
-                "p_law_name": law_name,
-                "p_article": article
-            }).execute()
-            
-            print(f"✅ 캐시 히트: {law_name} {article}")
-            return result.data[0]["content"]
-        
-        return None
-    
-    except Exception as e:
-        print(f"⚠️ 캐시 조회 실패: {e}")
-        return None
-
-
-def save_law_to_cache(law_name: str, article: str, content: str, mst: str = None):
-    """법령 캐시에 저장"""
-    try:
-        supabase.table("law_cache").upsert({
+        # 대화 로그 저장
+        supabase.table("conversation_logs").insert({
+            "session_id": session_id,
+            "user_question": user_question,
+            "bot_answer": bot_answer,
             "law_name": law_name,
             "article": article,
-            "content": content,
-            "mst": mst
+            "response_time_ms": response_time_ms
         }).execute()
         
-        print(f"✅ 캐시 저장: {law_name} {article}")
+        print(f"✅ 대화 저장 완료: {session_id}")
     
     except Exception as e:
-        print(f"⚠️ 캐시 저장 실패: {e}")
+        print(f"⚠️ 대화 저장 실패: {e}")
 
 
 def get_stats():

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent import run_agent
+from src.supabase_client import save_conversation, get_stats
 
 app = FastAPI(title='Lawbot-KR API')
 
@@ -24,23 +25,6 @@ class ChatResponse(BaseModel):
     answer: str
     session_id: str
 
-@app.post('/chat')
-async def chat(request: ChatRequest):
-    session_id = request.session_id or str(uuid.uuid4())
-
-    start_time = time.time()
-
-    try:
-        answer = run_agent(request.question)
-        response_time = int((time.time() - start_time) * 1000)
-
-        return ChatResponse(
-            answer=answer,
-            session_id=session_id
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get('/')
 def root():
     return {'status': 'ok', 'message': 'Lawbot-KR API'}
@@ -56,6 +40,7 @@ async def stats():
 
 @app.post('/chat')
 async def chat(request: ChatRequest):
+    """채팅 엔드포인트"""
     session_id = request.session_id or str(uuid.uuid4())
     
     start_time = time.time()
