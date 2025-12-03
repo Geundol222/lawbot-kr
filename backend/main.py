@@ -48,3 +48,34 @@ def root():
 @app.get('/health')
 def health():
     return {'status': 'healthy'}
+
+@app.get('/stats')
+async def stats():
+    """통계 조회"""
+    return get_stats()
+
+@app.post('/chat')
+async def chat(request: ChatRequest):
+    session_id = request.session_id or str(uuid.uuid4())
+    
+    start_time = time.time()
+    
+    try:
+        answer = run_agent(request.question)
+        response_time = int((time.time() - start_time) * 1000)
+        
+        # ⭐ Supabase에 저장 ⭐
+        save_conversation(
+            session_id=session_id,
+            user_question=request.question,
+            bot_answer=answer,
+            response_time_ms=response_time
+        )
+        
+        return ChatResponse(
+            answer=answer,
+            session_id=session_id
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
