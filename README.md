@@ -44,6 +44,7 @@ Backend API (FastAPI + Render)
 - **API Integration**: 
   - 국가법령정보센터 Open API
   - LangChain Tools & Function Calling
+  - LangGraph Agentic RAG
 
 ### Frontend (예정)
 - **Framework**: Next.js 14
