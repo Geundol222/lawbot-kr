@@ -1,6 +1,14 @@
+# app.py
 import streamlit as st
 import time
-from backend.src.agent import run_agent
+import sys
+from pathlib import Path
+
+# ⭐ backend 경로 추가 ⭐
+backend_path = Path(__file__).parent / 'backend'
+sys.path.insert(0, str(backend_path))
+
+from src.agent import run_agent
 
 # 페이지 설정
 st.set_page_config(
@@ -90,9 +98,9 @@ with st.sidebar:
     st.divider()
     
     st.subheader("ℹ️ 정보")
-    st.caption("**모델:** Google Gemini 2.0 Flash")
+    st.caption("**모델:** Google Gemini 2.5 Flash")
     st.caption("**데이터:** 국가법령정보센터 API")
     
-    # 통계 (선택사항)
+    # 통계
     if st.session_state.messages:
         st.metric("대화 수", len(st.session_state.messages) // 2)
