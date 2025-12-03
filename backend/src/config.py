@@ -5,10 +5,17 @@ from dotenv import load_dotenv
 # 환경변수는 바로 로드
 load_dotenv()
 
+# 법령 API
 LAW_API_SERVICE = os.getenv('LAW_API_SERVICE')
 LAW_API_SEARCH = os.getenv('LAW_API_SEARCH')
 LAW_API_OC = os.getenv('LAW_API_OC')
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')  # 오타 수정: GOOGLE_API → GOOGLE_API_KEY
+
+# Google
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
+# Supabase
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY')
 
 LAW_KEY = {
     '시행일 본문': 'eflaw',
