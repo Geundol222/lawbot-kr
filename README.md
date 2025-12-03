@@ -39,7 +39,7 @@ Backend API (FastAPI + Render)
 
 ### Backend
 - **Framework**: FastAPI
-- **LLM**: Google Gemini 2.0 Flash (via LangChain)
+- **LLM**: Google Gemini 2.5 Flash (via LangChain)
 - **Database**: Supabase (PostgreSQL)
 - **API Integration**: 
   - 국가법령정보센터 Open API
