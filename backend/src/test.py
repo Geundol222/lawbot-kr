@@ -1,5 +1,4 @@
 # test.py
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from law_tools import get_specific_law_article, search_law_by_situation

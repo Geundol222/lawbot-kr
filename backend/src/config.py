@@ -40,7 +40,7 @@ def get_llm():
     if _llm_instance is None:
         from langchain_google_genai import ChatGoogleGenerativeAI
         _llm_instance = ChatGoogleGenerativeAI(
-            model='gemini-2.0-flash-exp',
+            model='gemini-2.5-flash',
             temperature=0.0
         )
     

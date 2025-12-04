@@ -4,11 +4,11 @@ import time
 import sys
 from pathlib import Path
 
-# ⭐ backend 경로 추가 ⭐
+# backend 경로 추가
 backend_path = Path(__file__).parent / 'backend'
 sys.path.insert(0, str(backend_path))
 
-from src.agent import run_agent
+from src.agentic_rag import AgenticRAG
 
 # 페이지 설정
 st.set_page_config(
@@ -26,6 +26,10 @@ st.caption("💬 법률 질문을 입력하세요. 구체적인 조문이나 상
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# AgenticRAG 인스턴스 초기화 (세션마다 한 번만)
+if "agent" not in st.session_state:
+    st.session_state.agent = AgenticRAG()
+
 # 이전 대화 표시
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -41,20 +45,25 @@ if prompt := st.chat_input("예: 민법 제750조 알려줘"):
     
     # 챗봇 응답
     with st.chat_message("assistant"):
-        with st.spinner("🔍 법령 검색 중..."):
+        message_placeholder = st.empty()
+
+        with st.spinner("🔍 벡터 DB 검색 중..."):
             try:
-                response = run_agent(prompt)
-                st.markdown(response)
-                
+                # AgenticRAG로 답변 생성
+                response = st.session_state.agent.run(prompt)
+
+                # 타이핑 효과 (선택사항)
+                message_placeholder.markdown(response)
+
                 # 응답 저장
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": response
                 })
-            
+
             except Exception as e:
                 error_msg = f"❌ 오류가 발생했습니다: {str(e)}"
-                st.error(error_msg)
+                message_placeholder.error(error_msg)
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": error_msg
@@ -76,10 +85,10 @@ with st.sidebar:
     
     with st.expander("🤔 상황 설명 질문"):
         st.markdown("""
+        - 야근수당은 얼마나 받을 수 있어?
         - 회사가 야근수당 안 주는데?
         - 월세 계약 해지하고 싶어
         - 교통사고 났는데 보험처리
-        - 소 소유권 분쟁 어떡해?
         """)
     
     st.divider()
@@ -99,7 +108,18 @@ with st.sidebar:
     
     st.subheader("ℹ️ 정보")
     st.caption("**모델:** Google Gemini 2.5 Flash")
+    st.caption("**벡터 DB:** Supabase (3,926개 조문)")
     st.caption("**데이터:** 국가법령정보센터 API")
+
+    st.divider()
+
+    st.subheader("🔍 작동 방식")
+    st.caption("""
+    1. 벡터 검색으로 관련 법령 찾기
+    2. 유사도 ≥ 0.7: 조문 상세 조회
+    3. 유사도 < 0.7: API로 직접 검색
+    4. LLM이 법령 기반 답변 생성
+    """)
     
     # 통계
     if st.session_state.messages:

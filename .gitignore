@@ -1,2 +1,36 @@
+# 환경변수
 .env
+
+# 데이터
 data/
+DEBUG/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 가상환경
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 백업
+temp_backup/
+
+# Streamlit
+.streamlit/
