@@ -26,8 +26,8 @@ print('✅ 모델이 이미지에 포함되었습니다!')"
 COPY backend/ ./backend/
 COPY api/ ./api/
 
-# 포트 노출
-EXPOSE 8000
+# 포트 노출 (Hugging Face는 7860 사용)
+EXPOSE 7860
 
 # FastAPI 실행 (Uvicorn)
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]
