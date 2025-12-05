@@ -31,6 +31,14 @@ ENV/
 
 # 백업
 temp_backup/
+.env.backup
+
+# WandB
+wandb/
 
 # Streamlit
 .streamlit/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints

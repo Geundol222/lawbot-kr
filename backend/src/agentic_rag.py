@@ -10,6 +10,7 @@ from langchain_core.messages import (
     convert_to_messages,
 )
 from langchain.tools import tool
+import time
 
 from src.embeddings.vector_search import VectorSearch
 from src.law_api import (
@@ -20,6 +21,7 @@ from src.law_api import (
     extract_article_content
 )
 from src.config import get_llm
+from src.monitoring import get_wandb_logger, AgenticRAGLogger
 
 # ========================================
 # Tools 정의
@@ -32,16 +34,17 @@ def search_vector_db(query: str) -> str:
     """
     벡터 데이터베이스에서 유사한 법령 검색 (첫 번째 단계)
 
-    임베딩된 3,926개 조문에서 빠르게 검색
-    이 도구를 먼저 호출하여 벡터 DB에 관련 법령이 있는지 확인해야 합니다.
+    임베딩된 조문에서 빠르게 검색하고 조문 내용을 바로 반환합니다.
+    이 도구를 먼저 호출하여 벡터 DB에 관련 법령이 있는지 확인하세요.
 
     Args:
         query: 검색할 질문
 
     Returns:
-        유사한 법령 목록 (법령명, 조문, MST, 유사도)
-        - 유사도 0.7 이상: 조문 정보 반환 → get_full_article_content 사용
-        - 유사도 0.7 미만: VECTOR_DB_NO_MATCH → search_law_by_api 사용
+        - 성공: 법령명, 조문, 유사도, 조문 내용 포함 → 바로 답변 작성!
+        - 실패: VECTOR_DB_NO_MATCH → search_law_by_api 사용
+
+    중요: 이 도구가 성공하면 조문 내용이 포함되므로 추가 도구 호출 불필요!
     """
     results = vector_search_instance.search(query, top_k=5, threshold=0.7)
 
@@ -49,17 +52,16 @@ def search_vector_db(query: str) -> str:
         # 유사도 0.7 이상인 결과가 없음
         return "VECTOR_DB_NO_MATCH: 벡터 DB에서 유사도 0.7 이상인 법령을 찾지 못했습니다. search_law_by_api를 사용하여 직접 검색하세요."
 
-    # 결과를 구조화된 형식으로 반환
+    # 결과를 구조화된 형식으로 반환 (조문 내용 포함)
     result_text = "=== 벡터 검색 결과 (유사도 0.7 이상) ===\n\n"
     for idx, r in enumerate(results[:3], 1):
         result_text += f"[결과 {idx}]\n"
         result_text += f"법령: {r['law_name']}\n"
         result_text += f"조문: {r['article']}\n"
-        mst_text = r.get('mst') or "없음"
-        result_text += f"MST: {mst_text}\n"
-        result_text += f"유사도: {r['similarity']:.2f}\n\n"
+        result_text += f"유사도: {r['similarity']:.2f}\n"
+        result_text += f"내용: {r.get('content', '내용 없음')}\n\n"
 
-    result_text += "\n💡 다음 단계: get_full_article_content를 사용하여 조문의 전체 내용을 가져오세요."
+    result_text += "\n✅ 위 조문 내용으로 답변을 작성하세요. 추가 도구 호출 불필요!"
 
     return result_text
 
@@ -171,7 +173,7 @@ class AgentState(TypedDict):
 class AgenticRAG:
     def __init__(self):
         self.llm = get_llm()
-        
+
         # ⭐ Tools 바인딩 ⭐
         self.tools = [
             search_vector_db,
@@ -181,6 +183,15 @@ class AgenticRAG:
         # 도구는 프롬프트 지시에 따라 선택
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.graph = self._build_graph()
+
+        # WandB 로거 초기화
+        try:
+            self.wandb_logger = AgenticRAGLogger(get_wandb_logger())
+        except Exception:
+            self.wandb_logger = None
+
+        # 도구 실행 시간 추적
+        self.tool_execution_times = {}
     
     def _build_graph(self):
         """LangGraph 구성"""
@@ -219,26 +230,44 @@ class AgenticRAG:
                 tool_args = tool_call['args']
                 tool_id = tool_call['id']
 
-                # 도구 실행 로그 제거 (너무 장황함)
-
                 # 도구 실행
                 for tool in self.tools:
                     if tool.name == tool_name:
+                        start_time = time.time()
+                        success = True
+                        result_str = ""
+
                         try:
                             result = tool.invoke(tool_args)
+                            result_str = str(result)
                             tool_messages.append(
                                 ToolMessage(
-                                    content=str(result),
+                                    content=result_str,
                                     tool_call_id=tool_id
                                 )
                             )
                         except Exception as e:
+                            success = False
+                            result_str = f"도구 실행 오류: {str(e)}"
                             tool_messages.append(
                                 ToolMessage(
-                                    content=f"도구 실행 오류: {str(e)}",
+                                    content=result_str,
                                     tool_call_id=tool_id
                                 )
                             )
+
+                        execution_time = time.time() - start_time
+
+                        # WandB 로깅
+                        if self.wandb_logger:
+                            self.wandb_logger.log_tool_call(
+                                tool_name=tool_name,
+                                args=tool_args,
+                                result_preview=result_str[:200],
+                                execution_time=execution_time,
+                                success=success
+                            )
+
                         break
 
         return {
@@ -288,8 +317,8 @@ class AgenticRAG:
         messages = state['messages']
         last_message = messages[-1]
 
-        # 무한 루프 방지: 최대 3회 (벡터검색 → 조문조회 또는 API검색)
-        if state.get("tool_calls", 0) >= 3:
+        # 무한 루프 방지: 최대 10회 (벡터검색 → 조문조회 → API검색 → 재시도)
+        if state.get("tool_calls", 0) >= 10:
             print("⚠️ 최대 도구 호출 횟수 도달, 종료합니다.")
             return "end"
 
@@ -310,23 +339,38 @@ class AgenticRAG:
         print(f"❓ 질문: {question}")
         print(f"{'='*60}\n")
 
+        # WandB 세션 시작
+        if self.wandb_logger:
+            self.wandb_logger.start_session(question)
+
         # 초기 메시지
         initial_messages = [
             SystemMessage(
-                content="""한국 법률 상담 AI입니다. 아래 단계를 따라 작업하세요:
+                content="""한국 법률 상담 AI입니다. 반드시 아래 단계를 따라 작업하세요:
 
 1단계: search_vector_db(질문)로 벡터 DB 검색
+
 2단계:
-  - 벡터 검색 결과가 있으면 → get_full_article_content(법령명, 조문, MST)로 전체 조문 조회
-  - VECTOR_DB_NO_MATCH가 나오면 → search_law_by_api(법령명, 조문번호)로 API 검색
+  A. 벡터 검색 성공 시 (유사도 0.7 이상):
+     → 검색 결과에 "내용" 필드가 포함되어 있습니다
+     → 즉시 해당 내용으로 답변 작성 (추가 도구 호출 금지!)
+     → get_full_article_content 호출하지 마세요!
+
+  B. 벡터 검색 실패 시 (VECTOR_DB_NO_MATCH):
+     → search_law_by_api(법령명)로 API 검색
+     → 예: "택배 분실" → search_law_by_api("전자상거래법")
+
 3단계: 조회한 법령 내용으로 답변 작성
 
 답변 형식:
 - 요약
-- 근거 법령
+- 근거 법령 (법령명 + 조문)
 - 조문 내용
 
-중요: 동일한 도구를 반복 호출하지 마세요."""
+중요 규칙:
+1. 벡터 검색 결과에 "내용"이 있으면 바로 답변 작성! (API 호출 금지)
+2. get_full_article_content는 특별한 경우에만 사용 (벡터 검색에서 내용이 없을 때)
+3. 동일한 도구를 반복 호출하지 마세요"""
             ),
             HumanMessage(content=question)
         ]
@@ -347,12 +391,22 @@ class AgenticRAG:
         # 마지막 AI 메시지 반환
         final_message = result['messages'][-1]
 
+        answer = ""
         if hasattr(final_message, 'content'):
             content = final_message.content
             # content가 리스트인 경우 (Gemini 응답 형식)
             if isinstance(content, list):
                 text_parts = [part.get('text', '') for part in content if isinstance(part, dict) and 'text' in part]
-                return '\n'.join(text_parts)
-            return str(content)
+                answer = '\n'.join(text_parts)
+            else:
+                answer = str(content)
         else:
-            return str(final_message)
+            answer = str(final_message)
+
+        # WandB 세션 종료 및 로깅
+        if self.wandb_logger:
+            # 토큰 수 추정 (Gemini API에서 토큰 정보 제공하지 않으면 대략적으로 계산)
+            total_tokens = len(question.split()) + len(answer.split())
+            self.wandb_logger.end_session(answer, total_tokens)
+
+        return answer

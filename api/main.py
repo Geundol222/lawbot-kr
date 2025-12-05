@@ -7,12 +7,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
+import time
 
 # backend 경로 추가
 backend_path = Path(__file__).parent.parent / 'backend'
 sys.path.insert(0, str(backend_path))
 
 from src.agentic_rag import AgenticRAG
+from src.monitoring import get_wandb_logger, FastAPILogger
 
 # FastAPI 앱
 app = FastAPI(
@@ -32,6 +34,12 @@ app.add_middleware(
 
 # Agent 인스턴스 (싱글톤)
 agent = None
+
+# WandB 로거 초기화
+try:
+    fastapi_logger = FastAPILogger(get_wandb_logger())
+except Exception:
+    fastapi_logger = None
 
 def get_agent():
     """Agent 인스턴스 가져오기 (Lazy Loading)"""
@@ -82,11 +90,28 @@ async def chat(request: ChatRequest):
             - session_id: 세션 ID
     """
     session_id = request.session_id or str(uuid.uuid4())
+    start_time = time.time()
+
+    error_message = None
+    answer = ""
+    status_code = 200
 
     try:
         # Agent 실행
         agent_instance = get_agent()
         answer = agent_instance.run(request.question)
+
+        # WandB 로깅
+        if fastapi_logger:
+            response_time = time.time() - start_time
+            fastapi_logger.log_request(
+                session_id=session_id,
+                question=request.question,
+                answer_length=len(answer),
+                response_time=response_time,
+                status_code=status_code,
+                error_message=None
+            )
 
         return ChatResponse(
             answer=answer,
@@ -94,9 +119,24 @@ async def chat(request: ChatRequest):
         )
 
     except Exception as e:
+        error_message = str(e)
+        status_code = 500
+
+        # WandB 로깅 (에러)
+        if fastapi_logger:
+            response_time = time.time() - start_time
+            fastapi_logger.log_request(
+                session_id=session_id,
+                question=request.question,
+                answer_length=0,
+                response_time=response_time,
+                status_code=status_code,
+                error_message=error_message
+            )
+
         raise HTTPException(
-            status_code=500,
-            detail=f"Error processing question: {str(e)}"
+            status_code=status_code,
+            detail=f"Error processing question: {error_message}"
         )
 
 if __name__ == "__main__":

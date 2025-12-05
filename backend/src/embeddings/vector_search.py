@@ -1,8 +1,10 @@
 from sentence_transformers import SentenceTransformer
 from supabase import create_client
 import numpy as np
+import time
 
 from src.config import SUPABASE_URL, SUPABASE_KEY
+from src.monitoring import get_wandb_logger, VectorSearchLogger
 
 class VectorSearch:
     def __init__(self):
@@ -10,6 +12,12 @@ class VectorSearch:
         self.model = SentenceTransformer("intfloat/multilingual-e5-large-instruct")
         # create_client는 (url, key) 순서를 사용
         self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+        # WandB 로거 초기화
+        try:
+            self.wandb_logger = VectorSearchLogger(get_wandb_logger())
+        except Exception:
+            self.wandb_logger = None
 
     def search(self, query: str, top_k: int = 5, threshold: float = 0.0):
         """유사한 법령 검색
@@ -19,8 +27,14 @@ class VectorSearch:
             top_k: 반환할 최대 결과 수
             threshold: 유사도 임계값 (이 값 이상만 반환)
         """
+        search_start = time.time()
+
         # 질문 임베딩
+        embedding_start = time.time()
         query_emb = np.array(self.model.encode(query), dtype=np.float32).tolist()
+        embedding_time = time.time() - embedding_start
+
+        search_method = "RPC"
 
         # Supabase RPC 함수 호출 (match_law_documents)
         try:
@@ -34,10 +48,29 @@ class VectorSearch:
             ).execute()
 
             if result.data:
-                return self._deduplicate_chunks(result.data, top_k)
+                before_dedup = len(result.data)
+                final_results = self._deduplicate_chunks(result.data, top_k)
+                dedup_count = before_dedup - len(final_results)
+
+                # WandB 로깅
+                if self.wandb_logger:
+                    search_time = time.time() - search_start
+                    top_similarity = final_results[0].get("similarity", 0.0) if final_results else 0.0
+                    self.wandb_logger.log_search(
+                        query=query,
+                        search_time=search_time,
+                        embedding_time=embedding_time,
+                        results_count=len(final_results),
+                        top_similarity=top_similarity,
+                        search_method=search_method,
+                        deduplication_count=dedup_count
+                    )
+
+                return final_results
 
         except Exception as e:
             print(f"⚠️ RPC 호출 실패, 폴백 방식 사용: {e}")
+            search_method = "Fallback"
 
         # 폴백: 수동 유사도 계산
         query_emb = np.array(query_emb, dtype=np.float32)
@@ -86,7 +119,25 @@ class VectorSearch:
         similarities.sort(key=lambda x: x['similarity'], reverse=True)
 
         # 청크 중복 제거 후 반환
-        return self._deduplicate_chunks(similarities, top_k)
+        before_dedup = len(similarities)
+        final_results = self._deduplicate_chunks(similarities, top_k)
+        dedup_count = before_dedup - len(final_results)
+
+        # WandB 로깅
+        if self.wandb_logger:
+            search_time = time.time() - search_start
+            top_similarity = final_results[0].get("similarity", 0.0) if final_results else 0.0
+            self.wandb_logger.log_search(
+                query=query,
+                search_time=search_time,
+                embedding_time=embedding_time,
+                results_count=len(final_results),
+                top_similarity=top_similarity,
+                search_method=search_method,
+                deduplication_count=dedup_count
+            )
+
+        return final_results
 
     def _deduplicate_chunks(self, results: list, top_k: int) -> list:
         """
