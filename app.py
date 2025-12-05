@@ -108,7 +108,7 @@ with st.sidebar:
     
     st.subheader("ℹ️ 정보")
     st.caption("**모델:** Google Gemini 2.5 Flash")
-    st.caption("**벡터 DB:** Supabase (3,926개 조문)")
+    st.caption("**벡터 DB:** Supabase (청크 기반 임베딩)")
     st.caption("**데이터:** 국가법령정보센터 API")
 
     st.divider()

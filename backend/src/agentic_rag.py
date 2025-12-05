@@ -68,26 +68,29 @@ def search_vector_db(query: str) -> str:
 def get_full_article_content(law_name: str, article: str, mst: str) -> str:
     """
     법령의 특정 조문 전체 내용 가져오기
-    
+
     벡터 검색으로 찾은 법령의 전체 내용을 API로 조회
-    
+
     Args:
         law_name: 법령명
         article: 조문 (예: "제56조")
         mst: 법령일련번호
-    
+
     Returns:
         조문 전체 내용
     """
     if not mst:
         return "MST(법령일련번호) 정보가 없어 조문을 가져올 수 없습니다. search_law_by_api를 사용하세요."
-    
-    jo_formatted = format_jo_number(article)
+
+    # 청크 suffix 제거 (예: "제56조_part1" -> "제56조")
+    base_article = article.split("_part")[0]
+
+    jo_formatted = format_jo_number(base_article)
     law_data = get_law_article(mst=mst, jo=jo_formatted)
     content = extract_article_content(law_data)
-    
+
     if content and "오류" not in content:
-        return f"=== {law_name} {article} ===\n\n{content}"
+        return f"=== {law_name} {base_article} ===\n\n{content}"
     else:
         return f"조문 가져오기 실패: {content}"
 

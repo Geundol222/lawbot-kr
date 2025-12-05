@@ -29,12 +29,12 @@ class VectorSearch:
                 {
                     'query_embedding': query_emb,
                     'match_threshold': threshold,
-                    'match_count': top_k
+                    'match_count': top_k * 3  # 청크 중복 고려하여 더 많이 가져옴
                 }
             ).execute()
 
             if result.data:
-                return result.data
+                return self._deduplicate_chunks(result.data, top_k)
 
         except Exception as e:
             print(f"⚠️ RPC 호출 실패, 폴백 방식 사용: {e}")
@@ -82,6 +82,42 @@ class VectorSearch:
                     }
                 )
 
-        # 정렬 & 반환
+        # 정렬
         similarities.sort(key=lambda x: x['similarity'], reverse=True)
-        return similarities[:top_k]
+
+        # 청크 중복 제거 후 반환
+        return self._deduplicate_chunks(similarities, top_k)
+
+    def _deduplicate_chunks(self, results: list, top_k: int) -> list:
+        """
+        청크 중복 제거 (같은 조문의 여러 part 중 가장 높은 유사도만 유지)
+
+        Args:
+            results: 검색 결과 리스트
+            top_k: 반환할 최대 결과 수
+
+        Returns:
+            중복 제거된 결과
+        """
+        seen_articles = {}
+
+        for item in results:
+            law_name = item.get("law_name")
+            article = item.get("article", "")
+
+            # 청크 suffix 제거 (예: "제56조_part1" -> "제56조")
+            base_article = article.split("_part")[0]
+            key = f"{law_name}:{base_article}"
+
+            # 같은 조문이 없거나, 더 높은 유사도면 업데이트
+            if key not in seen_articles or item.get("similarity", 0) > seen_articles[key].get("similarity", 0):
+                # article 필드를 base로 정규화
+                normalized_item = item.copy()
+                normalized_item["article"] = base_article
+                seen_articles[key] = normalized_item
+
+        # 유사도 순으로 정렬하여 반환
+        deduplicated = list(seen_articles.values())
+        deduplicated.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+
+        return deduplicated[:top_k]
