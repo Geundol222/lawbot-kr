@@ -44,9 +44,51 @@ Supabase에서 벡터 검색 RPC 함수를 생성해야 합니다:
 
 1. [Supabase 대시보드](https://supabase.com) 접속
 2. SQL Editor 열기
-3. `DEBUG/supabase_setup_minimal.sql` 내용 실행
+3. 다음 SQL 실행:
 
-자세한 내용은 `DEBUG/SUPABASE_SETUP.md` 참고
+```sql
+-- pgvector 확장 활성화
+create extension if not exists vector;
+
+-- 기존 함수 삭제
+DROP FUNCTION IF EXISTS match_law_documents(vector, float, int);
+DROP FUNCTION IF EXISTS match_law_documents(vector, double precision, integer);
+
+-- RPC 함수 생성
+CREATE OR REPLACE FUNCTION match_law_documents(
+  query_embedding vector(1024),
+  match_threshold float DEFAULT 0.0,
+  match_count int DEFAULT 10
+)
+RETURNS TABLE (
+  id bigint,
+  law_name text,
+  article text,
+  mst text,
+  content text,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    law_cache.id,
+    law_cache.law_name::text,
+    law_cache.article::text,
+    law_cache.mst::text,
+    law_cache.content::text,
+    (1 - (law_cache.embedding <=> query_embedding))::float AS similarity
+  FROM law_cache
+  WHERE 1 - (law_cache.embedding <=> query_embedding) >= match_threshold
+  ORDER BY law_cache.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+
+-- RLS 비활성화
+ALTER TABLE law_cache DISABLE ROW LEVEL SECURITY;
+```
 
 ### 3. 임베딩 생성 (선택사항)
 
@@ -102,15 +144,9 @@ lawbot-kr/
 │   ├── baseline.env                # v1.0 베이스라인 설정
 │   ├── chunking.env                # v2.0 청킹 적용 설정
 │   └── optimized.env               # v2.1 최적화 설정
-├── scripts/
-│   ├── run_experiment.sh           # 실험 실행 스크립트
-│   └── switch_config.sh            # 설정 전환 스크립트
-└── DEBUG/
-    ├── SUPABASE_SETUP.md           # Supabase 설정 가이드
-    ├── WANDB_GUIDE.md              # WandB 로깅 가이드
-    ├── WANDB_QUICK_START.md        # WandB 빠른 시작
-    ├── WANDB_VERSION_GUIDE.md      # 버전 관리 가이드
-    └── GIT_COMMIT_GUIDE.md         # Git 커밋 가이드
+└── scripts/
+    ├── run_experiment.sh           # 실험 실행 스크립트
+    └── switch_config.sh            # 설정 전환 스크립트
 ```
 
 ---
@@ -204,7 +240,11 @@ lawbot-kr/
 - `fastapi/avg_response_time`: 평균 응답 시간
 - `fastapi/error_rate`: 에러율
 
-자세한 내용은 `DEBUG/WANDB_GUIDE.md` 참고
+**테이블 로깅:**
+- `tool_calls_log`: 도구 호출 내역
+- `vector_search_log`: 벡터 검색 로그
+- `law_api_calls_log`: API 호출 로그
+- `fastapi_requests_log`: HTTP 요청 로그
 
 ---
 
@@ -250,9 +290,7 @@ lawbot-kr/
 ```
 
 **해결:**
-1. `DEBUG/supabase_setup_minimal.sql` 파일 내용을 Supabase SQL Editor에서 실행
-2. 메모리 부족 시 인덱스 없는 버전 사용
-3. 자세한 내용: `DEBUG/SUPABASE_SETUP.md`
+위의 "Supabase 벡터 검색 설정" 섹션의 SQL을 실행하세요.
 
 ### 벡터 검색 느림
 
