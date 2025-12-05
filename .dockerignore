@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 가상환경
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 데이터
+data/
+DEBUG/
+
+# 백업
+temp_backup/
+
+# Streamlit
+.streamlit/
+
+# 환경변수 (보안)
+.env
+
+# 테스트
+*.test.py
+tests/
+
+# 문서
+*.md
+!README.md
+
+# 로그
+*.log
