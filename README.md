@@ -1,3 +1,12 @@
+---
+title: 한국 법령 챗봇 (Lawbot-KR)
+emoji: ⚖️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # 한국 법령 챗봇 (Lawbot-KR)
 
 벡터 검색과 Agentic RAG를 결합한 한국 법령 상담 AI 챗봇
