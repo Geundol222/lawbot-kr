@@ -172,28 +172,22 @@ export default function ChatInterface() {
                 <div
                   className={`rounded-2xl shadow-sm ${
                     msg.role === 'user'
-                      ? 'bg-gradient-to-br from-blue-500 to-indigo-600'
+                      ? 'bg-gray-100 border border-gray-300'
                       : 'bg-white border border-gray-200'
                   }`}
                 >
                   <div className="p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-semibold ${
-                        msg.role === 'user' ? 'text-blue-100' : 'text-gray-500'
-                      }`}>
+                      <span className="text-xs font-semibold text-gray-500">
                         {msg.role === 'user' ? '사용자' : 'AI 법률 어시스턴트'}
                       </span>
                       {msg.timestamp && (
-                        <span className={`text-xs ${
-                          msg.role === 'user' ? 'text-blue-100' : 'text-gray-400'
-                        }`}>
+                        <span className="text-xs text-gray-400">
                           {msg.timestamp.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       )}
                     </div>
-                    <div className={`whitespace-pre-wrap leading-relaxed ${
-                      msg.role === 'user' ? 'text-gray-900' : 'text-gray-900'
-                    }`}>
+                    <div className="whitespace-pre-wrap leading-relaxed text-gray-900">
                       {msg.content}
                     </div>
                   </div>
