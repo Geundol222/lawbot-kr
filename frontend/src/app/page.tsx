@@ -6,33 +6,33 @@ import { useStats } from '@/contexts/StatsContext';
 export default function Home() {
   const { stats } = useStats();
   return (
-    <main className="relative min-h-screen overflow-hidden">
+    <main className="relative min-h-screen overflow-hidden flex flex-col">
       {/* Animated Background */}
       <div className="fixed inset-0 bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900">
         {/* Animated gradient orbs */}
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-purple-500/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
-        <div className="absolute bottom-0 left-1/3 w-96 h-96 bg-indigo-500/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
+        <div className="absolute top-0 left-1/4 w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 bg-blue-500/30 rounded-full mix-blend-multiply filter blur-3xl opacity-60 md:opacity-70 animate-blob"></div>
+        <div className="absolute top-0 right-1/4 w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 bg-purple-500/30 rounded-full mix-blend-multiply filter blur-3xl opacity-60 md:opacity-70 animate-blob animation-delay-2000"></div>
+        <div className="absolute bottom-0 left-1/3 w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 bg-indigo-500/30 rounded-full mix-blend-multiply filter blur-3xl opacity-60 md:opacity-70 animate-blob animation-delay-4000"></div>
       </div>
 
       {/* Content */}
-      <div className="relative z-10">
+      <div className="relative z-10 flex flex-col h-full">
         {/* 헤더 */}
-        <header className="backdrop-blur-xl bg-white/10 border-b border-white/20 shadow-xl">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+        <header className="flex-shrink-0 backdrop-blur-xl bg-white/10 border-b border-white/20 shadow-xl">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3 lg:py-5">
             <div className="flex items-center justify-between">
               {/* 로고 및 타이틀 */}
               <div className="flex items-center space-x-4">
                 <div className="relative group">
                   <div className="absolute -inset-1 bg-gradient-to-r from-blue-400 via-purple-500 to-indigo-400 rounded-2xl blur opacity-75 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse-slow"></div>
-                  <div className="relative flex items-center justify-center w-14 h-14 bg-gradient-to-br from-blue-500 via-purple-600 to-indigo-600 rounded-xl shadow-2xl">
-                    <svg className="w-7 h-7 text-white animate-float" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="relative flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-blue-500 via-purple-600 to-indigo-600 rounded-xl shadow-2xl">
+                    <svg className="w-6 h-6 sm:w-7 sm:h-7 text-white animate-float" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
                     </svg>
                   </div>
                 </div>
                 <div>
-                  <h1 className="text-2xl font-black bg-gradient-to-r from-white via-blue-100 to-purple-200 bg-clip-text text-transparent drop-shadow-lg">
+                  <h1 className="text-xl sm:text-2xl font-black bg-gradient-to-r from-white via-blue-100 to-purple-200 bg-clip-text text-transparent drop-shadow-lg">
                     한국 법령 챗봇
                   </h1>
                   <p className="text-sm text-blue-200/90 hidden sm:block font-medium">
@@ -78,32 +78,32 @@ export default function Home() {
         </header>
 
         {/* 메인 컨텐츠 */}
-        <div className="pt-6">
+        <div className="flex-1 overflow-hidden pt-4 sm:pt-6">
           <ChatInterface />
         </div>
 
         {/* 푸터 - 더 화려하게 */}
-        <footer className="mt-12 pb-8">
-          <div className="max-w-7xl mx-auto px-4">
+        <footer className="flex-shrink-0 pb-8 pt-6">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6">
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
               <div className="backdrop-blur-xl bg-white/10 rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-                <div className="text-2xl font-bold text-white">{stats.totalQuestions}+</div>
-                <div className="text-xs text-blue-200">질문 처리</div>
+                <div className="text-xl sm:text-2xl font-bold text-white">{stats.totalQuestions}+</div>
+                <div className="text-[11px] sm:text-xs text-blue-200">질문 처리</div>
               </div>
               <div className="backdrop-blur-xl bg-white/10 rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-                <div className="text-2xl font-bold text-white">{Math.round(stats.successRate)}%</div>
-                <div className="text-xs text-blue-200">정확도</div>
+                <div className="text-xl sm:text-2xl font-bold text-white">{Math.round(stats.successRate)}%</div>
+                <div className="text-[11px] sm:text-xs text-blue-200">정확도</div>
               </div>
               <div className="backdrop-blur-xl bg-white/10 rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-                <div className="text-2xl font-bold text-white">
+                <div className="text-xl sm:text-2xl font-bold text-white">
                   {stats.averageResponseTime > 0 ? `${stats.averageResponseTime.toFixed(1)}s` : '< 3s'}
                 </div>
-                <div className="text-xs text-blue-200">평균 응답 속도</div>
+                <div className="text-[11px] sm:text-xs text-blue-200">평균 응답 속도</div>
               </div>
               <div className="backdrop-blur-xl bg-white/10 rounded-2xl p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-                <div className="text-2xl font-bold text-white">24/7</div>
-                <div className="text-xs text-blue-200">서비스</div>
+                <div className="text-xl sm:text-2xl font-bold text-white">24/7</div>
+                <div className="text-[11px] sm:text-xs text-blue-200">서비스</div>
               </div>
             </div>
 
