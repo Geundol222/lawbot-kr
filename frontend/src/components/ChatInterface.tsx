@@ -172,8 +172,8 @@ export default function ChatInterface() {
                 <div
                   className={`rounded-2xl shadow-sm ${
                     msg.role === 'user'
-                      ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white'
-                      : 'bg-white border border-gray-200 text-gray-900'
+                      ? 'bg-gradient-to-br from-blue-500 to-indigo-600'
+                      : 'bg-white border border-gray-200'
                   }`}
                 >
                   <div className="p-4">
@@ -191,7 +191,9 @@ export default function ChatInterface() {
                         </span>
                       )}
                     </div>
-                    <div className="whitespace-pre-wrap leading-relaxed">
+                    <div className={`whitespace-pre-wrap leading-relaxed ${
+                      msg.role === 'user' ? 'text-gray-900' : 'text-gray-900'
+                    }`}>
                       {msg.content}
                     </div>
                   </div>
