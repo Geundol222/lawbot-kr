@@ -14,7 +14,9 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # Supabase (필수 환경변수)
 SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY')
+# 서버 사이드 쓰기 권한을 위해 서비스 롤 키가 있으면 우선 사용하고, 없으면 anon 키로 폴백
+SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or os.getenv('SUPABASE_ANON_KEY')
 
 # 필수 환경변수 검증
 def validate_required_env_vars():
