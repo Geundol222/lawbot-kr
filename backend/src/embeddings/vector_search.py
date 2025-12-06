@@ -12,6 +12,8 @@ class VectorSearch:
         self.model = SentenceTransformer("intfloat/multilingual-e5-large-instruct")
         # create_client는 (url, key) 순서를 사용
         self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # 마지막 검색 결과를 보관해 후속 로깅/저장에 활용
+        self.last_results = []
 
         # WandB 로거 초기화
         try:
@@ -28,6 +30,8 @@ class VectorSearch:
             threshold: 유사도 임계값 (이 값 이상만 반환)
         """
         search_start = time.time()
+        # 이전 결과 초기화
+        self.last_results = []
 
         # 질문 임베딩
         embedding_start = time.time()
@@ -66,6 +70,7 @@ class VectorSearch:
                         deduplication_count=dedup_count
                     )
 
+                self.last_results = final_results
                 return final_results
 
         except Exception as e:
@@ -137,6 +142,7 @@ class VectorSearch:
                 deduplication_count=dedup_count
             )
 
+        self.last_results = final_results
         return final_results
 
     def _deduplicate_chunks(self, results: list, top_k: int) -> list:

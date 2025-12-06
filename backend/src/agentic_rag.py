@@ -335,6 +335,7 @@ class AgenticRAG:
     
     def run(self, question: str, session_id: Optional[str] = None) -> str:
         """Agent 실행"""
+        start_time = time.time()
         print(f"\n{'='*60}")
         print(f"🤖 Agentic RAG 시작")
         print(f"❓ 질문: {question}")
@@ -342,6 +343,8 @@ class AgenticRAG:
 
         # 세션 아이디 없으면 새로 발급 (대화 기록용)
         session_id = session_id or str(uuid4())
+        # 이전 검색 결과 초기화 (로그 저장용)
+        vector_search_instance.last_results = []
 
         # WandB 세션 시작
         if self.wandb_logger:
@@ -415,10 +418,21 @@ class AgenticRAG:
 
         # Supabase 대화 로그 저장 (실패해도 에이전트 동작은 계속)
         try:
+            # 벡터 검색이 성공한 경우 대표 법령/조문을 함께 저장
+            law_name = None
+            article = None
+            if vector_search_instance.last_results:
+                top = vector_search_instance.last_results[0]
+                law_name = top.get("law_name")
+                article = top.get("article")
+
             save_conversation(
                 session_id=session_id,
                 user_question=question,
                 bot_answer=answer,
+                law_name=law_name,
+                article=article,
+                response_time_ms=int((time.time() - start_time) * 1000)
             )
         except Exception as e:
             print(f"⚠️ Supabase 대화 저장 실패: {e}")
