@@ -37,8 +37,8 @@ def validate_required_env_vars():
         raise ValueError(error_msg)
 
     print("✅ 환경변수 로드 완료:")
-    print(f"   - SUPABASE_URL: {SUPABASE_URL[:30]}...")
-    print(f"   - SUPABASE_ANON_KEY: {SUPABASE_KEY[:20]}...")
+    print(f"   - SUPABASE_URL: {'설정됨' if SUPABASE_URL else '없음'}")
+    print(f"   - SUPABASE_ANON_KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
     print(f"   - GOOGLE_API_KEY: {'설정됨' if GOOGLE_API_KEY else '없음'}")
     print(f"   - LAW_API_OC: {'설정됨' if LAW_API_OC else '없음'}")
 
