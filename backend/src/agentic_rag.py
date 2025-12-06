@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Optional
 from uuid import uuid4
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -21,6 +21,7 @@ from src.law_api import (
     extract_article_content
 )
 from src.config import get_llm
+from src.supabase_client import save_conversation
 from src.monitoring import get_wandb_logger, AgenticRAGLogger
 
 # ========================================
@@ -332,12 +333,15 @@ class AgenticRAG:
     # 실행
     # ========================================
     
-    def run(self, question: str) -> str:
+    def run(self, question: str, session_id: Optional[str] = None) -> str:
         """Agent 실행"""
         print(f"\n{'='*60}")
         print(f"🤖 Agentic RAG 시작")
         print(f"❓ 질문: {question}")
         print(f"{'='*60}\n")
+
+        # 세션 아이디 없으면 새로 발급 (대화 기록용)
+        session_id = session_id or str(uuid4())
 
         # WandB 세션 시작
         if self.wandb_logger:
@@ -408,5 +412,15 @@ class AgenticRAG:
             # 토큰 수 추정 (Gemini API에서 토큰 정보 제공하지 않으면 대략적으로 계산)
             total_tokens = len(question.split()) + len(answer.split())
             self.wandb_logger.end_session(answer, total_tokens)
+
+        # Supabase 대화 로그 저장 (실패해도 에이전트 동작은 계속)
+        try:
+            save_conversation(
+                session_id=session_id,
+                user_question=question,
+                bot_answer=answer,
+            )
+        except Exception as e:
+            print(f"⚠️ Supabase 대화 저장 실패: {e}")
 
         return answer

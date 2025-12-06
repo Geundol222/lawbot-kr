@@ -3,6 +3,7 @@ import streamlit as st
 import time
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 # backend 경로 추가
 backend_path = Path(__file__).parent / 'backend'
@@ -25,6 +26,10 @@ st.caption("💬 법률 질문을 입력하세요. 구체적인 조문이나 상
 # 세션 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# Supabase용 세션 ID (대화별 유지)
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid4())
 
 # AgenticRAG 인스턴스 초기화 (세션마다 한 번만)
 if "agent" not in st.session_state:
@@ -50,7 +55,10 @@ if prompt := st.chat_input("예: 민법 제750조 알려줘"):
         with st.spinner("🔍 벡터 DB 검색 중..."):
             try:
                 # AgenticRAG로 답변 생성
-                response = st.session_state.agent.run(prompt)
+                response = st.session_state.agent.run(
+                    prompt,
+                    session_id=st.session_state.session_id
+                )
 
                 # 타이핑 효과 (선택사항)
                 message_placeholder.markdown(response)

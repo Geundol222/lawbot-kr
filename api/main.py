@@ -3,7 +3,7 @@ FastAPI 엔드포인트 (Vercel/Render 배포용)
 """
 import sys
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
@@ -75,7 +75,7 @@ def health():
     return {"status": "healthy"}
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_request: Request, http_response: Response):
     """
     채팅 엔드포인트
 
@@ -89,7 +89,23 @@ async def chat(request: ChatRequest):
             - answer: AI 답변
             - session_id: 세션 ID
     """
-    session_id = request.session_id or str(uuid.uuid4())
+    # 기기 단위 식별자: 쿠키에 없으면 새로 생성
+    def ensure_device_id(req: Request, res: Response) -> str:
+        existing = req.cookies.get("device_id")
+        if existing:
+            return existing
+        new_id = str(uuid.uuid4())
+        # 2년 보관, Lax로 CSRF 위험 낮춤, HttpOnly는 JS에서 접근이 필요하면 False 유지
+        res.set_cookie(
+            key="device_id",
+            value=new_id,
+            max_age=60 * 60 * 24 * 365 * 2,
+            samesite="lax",
+        )
+        return new_id
+
+    device_id = ensure_device_id(http_request, http_response)
+    session_id = request.session_id or device_id
     start_time = time.time()
 
     error_message = None
@@ -99,7 +115,7 @@ async def chat(request: ChatRequest):
     try:
         # Agent 실행
         agent_instance = get_agent()
-        answer = agent_instance.run(request.question)
+        answer = agent_instance.run(request.question, session_id=session_id)
 
         # WandB 로깅
         if fastapi_logger:
