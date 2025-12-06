@@ -6,8 +6,8 @@ from src.config import SUPABASE_KEY, SUPABASE_URL
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("❌ Supabase 환경변수가 설정되지 않았습니다!")
 
-print(f"✅ Supabase URL: {SUPABASE_URL[:30]}...")
-print(f"✅ Supabase KEY: {SUPABASE_KEY[:30]}...")
+print(f"✅ Supabase URL: {'설정됨' if SUPABASE_URL else '없음'}")
+print(f"✅ Supabase KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
