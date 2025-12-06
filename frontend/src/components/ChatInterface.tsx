@@ -229,7 +229,7 @@ export default function ChatInterface() {
 
       {/* 입력 영역 */}
       <div className="border-t border-gray-200 pt-4 pb-4 bg-white/80 backdrop-blur-sm">
-        <form onSubmit={handleSubmit} className="flex gap-3 items-end">
+        <form onSubmit={handleSubmit} className="flex gap-3 items-start">
           <div className="flex-1 relative">
             <textarea
               value={input}
@@ -242,7 +242,7 @@ export default function ChatInterface() {
               }}
               placeholder="법률 질문을 입력하세요... (Shift+Enter로 줄바꿈)"
               rows={1}
-              className="w-full px-4 py-3 pr-12 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-200"
+              className="w-full px-4 py-3 pr-12 border-2 border-gray-900 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-200 text-gray-900 placeholder-gray-400"
               disabled={loading}
               style={{
                 minHeight: '52px',
@@ -264,7 +264,7 @@ export default function ChatInterface() {
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg flex items-center space-x-2 font-medium"
+            className="h-[52px] px-6 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg flex items-center justify-center space-x-2 font-medium flex-shrink-0"
           >
             {loading ? (
               <>
