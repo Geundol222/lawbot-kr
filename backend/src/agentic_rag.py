@@ -85,15 +85,13 @@ def get_full_article_content(law_name: str, article: str, mst: str) -> str:
     if not mst:
         return "MST(법령일련번호) 정보가 없어 조문을 가져올 수 없습니다. search_law_by_api를 사용하세요."
 
-    # 청크 suffix 제거 (예: "제56조_part1" -> "제56조")
-    base_article = article.split("_part")[0]
-
-    jo_formatted = format_jo_number(base_article)
+    # 조 단위 청킹이므로 _part suffix 제거 불필요
+    jo_formatted = format_jo_number(article)
     law_data = get_law_article(mst=mst, jo=jo_formatted)
     content = extract_article_content(law_data)
 
     if content and "오류" not in content:
-        return f"=== {law_name} {base_article} ===\n\n{content}"
+        return f"=== {law_name} {article} ===\n\n{content}"
     else:
         return f"조문 가져오기 실패: {content}"
 

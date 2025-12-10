@@ -1,6 +1,7 @@
 """
 법령 임베딩 생성 및 Supabase 업로드 스크립트
-- 전체 조문 청킹 (1000자 제한 해결)
+- 조 단위 청킹 (맥락 완전 보존, 분석 결과 기반)
+- 평균 조문 길이: 81자, 최대: 1564자 → 청킹 불필요
 - 자동 캐시 초기화
 """
 import os
@@ -30,9 +31,10 @@ LAW_API_OC = os.getenv("LAW_API_OC")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
-# 청킹 설정
-CHUNK_SIZE = 500  # 청크 크기 (문자)
-CHUNK_OVERLAP = 100  # 청크 오버랩
+# 청킹 설정 (조 단위 청킹 - 더 이상 사용하지 않음)
+# 분석 결과: 평균 81자, 96.8%가 500자 미만 → 조 전체를 하나의 청크로 사용
+# CHUNK_SIZE = 500
+# CHUNK_OVERLAP = 100
 
 # 주요 법령 목록
 MAJOR_LAWS = [
@@ -63,34 +65,11 @@ MAJOR_LAWS = [
 ]
 
 # ========================================
-# 청킹 함수
+# 청킹 함수 (조 단위 - 더 이상 사용하지 않음)
 # ========================================
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """
-    긴 텍스트를 청크로 나누기
-
-    Args:
-        text: 원본 텍스트
-        chunk_size: 청크 크기
-        overlap: 청크 간 오버랩
-
-    Returns:
-        청크 리스트
-    """
-    if len(text) <= chunk_size:
-        return [text]
-
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = start + chunk_size
-        chunk = text[start:end]
-        chunks.append(chunk)
-        start += chunk_size - overlap
-
-    return chunks
+# 조 전체를 하나의 청크로 사용하므로 텍스트 기반 청킹 불필요
+# 분석 결과 대부분 조문이 충분히 짧음 (평균 81자)
 
 # ========================================
 # API 함수
@@ -144,7 +123,7 @@ def search_law_mst(law_name: str) -> Optional[Dict]:
 
 
 def get_all_articles(mst: str, law_name: str) -> List[Dict]:
-    """MST로 모든 조문 가져오기 (전체 내용, 청킹 적용)"""
+    """MST로 모든 조문 가져오기 (조 단위, 청킹 없음)"""
     params = {
         'OC': LAW_API_OC,
         'target': 'law',
@@ -209,22 +188,15 @@ def get_all_articles(mst: str, law_name: str) -> List[Dict]:
             full_content = ' '.join(content_parts)
 
             if full_content and len(full_content) > 10:
-                # ⭐ 청킹 적용 ⭐
-                chunks = chunk_text(full_content)
-
-                for chunk_idx, chunk in enumerate(chunks):
-                    chunk_suffix = f"_part{chunk_idx + 1}" if len(chunks) > 1 else ""
-
-                    articles.append({
-                        'law_name': law_name,
-                        'article': f'제{article_num}조{chunk_suffix}',
-                        'title': article_title if isinstance(article_title, str) else '',
-                        'content': chunk,
-                        'full_content': full_content,  # 전체 내용도 저장
-                        'chunk_index': chunk_idx,
-                        'total_chunks': len(chunks),
-                        'mst': mst
-                    })
+                # ⭐ 조 단위 청킹 (청크 분할 없음) ⭐
+                # 조 전체를 하나의 청크로 저장
+                articles.append({
+                    'law_name': law_name,
+                    'article': f'제{article_num}조',
+                    'title': article_title if isinstance(article_title, str) else '',
+                    'content': full_content,  # 조 전체 내용 (모든 항 포함)
+                    'mst': mst
+                })
 
         return articles
 
@@ -261,13 +233,13 @@ def collect_law_articles() -> List[Dict]:
             time.sleep(2)
             continue
 
-        # 조문 수집 (청킹 적용)
+        # 조문 수집 (조 단위)
         articles = get_all_articles(law_info['mst'], law_name)
 
         if articles:
             all_articles.extend(articles)
             success_count += 1
-            print(f"✅ {law_name}: {len(articles)}개 청크 생성")
+            print(f"✅ {law_name}: {len(articles)}개 조문 수집")
         else:
             print(f"⚠️ {law_name}: 조문이 없습니다")
             failed_laws.append(law_name)
@@ -275,7 +247,7 @@ def collect_law_articles() -> List[Dict]:
         time.sleep(2)  # Rate Limit 방지
 
     print("\n" + "="*60)
-    print(f"🎉 총 {len(all_articles)}개 청크 수집 완료!")
+    print(f"🎉 총 {len(all_articles)}개 조문 수집 완료! (조 단위 청킹)")
     print(f"✅ 성공한 법령: {success_count}/{len(MAJOR_LAWS)}개")
     print(f"⚠️ 실패한 법령: {len(failed_laws)}개")
     if failed_laws:
