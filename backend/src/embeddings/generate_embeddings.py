@@ -115,10 +115,10 @@ def search_law_mst(law_name: str) -> Optional[Dict]:
         return None
 
     except requests.exceptions.Timeout:
-        print(f"⏱️ 타임아웃 ({law_name})")
+        print(f"[TIMEOUT] ({law_name})")
         return None
     except Exception as e:
-        print(f"⚠️ 에러 ({law_name}): {e}")
+        print(f"[ERROR] ({law_name}): {e}")
         return None
 
 
@@ -135,17 +135,17 @@ def get_all_articles(mst: str, law_name: str) -> List[Dict]:
         response = requests.get(LAW_API_SERVICE, params=params, timeout=30)
 
         if not response.text or response.text.strip() == '':
-            print(f"⚠️ 빈 응답 ({law_name})")
+            print(f"[WARN] 빈 응답 ({law_name})")
             return []
 
         try:
             data = response.json()
         except json.JSONDecodeError:
-            print(f"⚠️ JSON 파싱 실패 ({law_name})")
+            print(f"[WARN] JSON 파싱 실패 ({law_name})")
             return []
 
         if '법령' not in data:
-            print(f"⚠️ 법령 데이터 없음 ({law_name})")
+            print(f"[WARN] 법령 데이터 없음 ({law_name})")
             return []
 
         articles = []
@@ -201,10 +201,10 @@ def get_all_articles(mst: str, law_name: str) -> List[Dict]:
         return articles
 
     except requests.exceptions.RequestException as e:
-        print(f"⚠️ 네트워크 에러 ({law_name}): {e}")
+        print(f"[ERROR] 네트워크 에러 ({law_name}): {e}")
         return []
     except Exception as e:
-        print(f"⚠️ 조문 수집 실패 ({law_name}): {e}")
+        print(f"[ERROR] 조문 수집 실패 ({law_name}): {e}")
         import traceback
         traceback.print_exc()
         return []
@@ -216,7 +216,7 @@ def get_all_articles(mst: str, law_name: str) -> List[Dict]:
 def collect_law_articles() -> List[Dict]:
     """법령 조문 수집"""
     print("\n" + "="*60)
-    print("📚 법령 데이터 수집 시작...")
+    print("[START] 법령 데이터 수집 시작...")
     print("="*60 + "\n")
 
     all_articles = []
@@ -228,7 +228,7 @@ def collect_law_articles() -> List[Dict]:
         law_info = search_law_mst(law_name)
 
         if not law_info:
-            print(f"❌ {law_name}: MST를 찾을 수 없습니다")
+            print(f"[FAIL] {law_name}: MST를 찾을 수 없습니다")
             failed_laws.append(law_name)
             time.sleep(2)
             continue
@@ -239,17 +239,17 @@ def collect_law_articles() -> List[Dict]:
         if articles:
             all_articles.extend(articles)
             success_count += 1
-            print(f"✅ {law_name}: {len(articles)}개 조문 수집")
+            print(f"[OK] {law_name}: {len(articles)}개 조문 수집")
         else:
-            print(f"⚠️ {law_name}: 조문이 없습니다")
+            print(f"[WARN] {law_name}: 조문이 없습니다")
             failed_laws.append(law_name)
 
         time.sleep(2)  # Rate Limit 방지
 
     print("\n" + "="*60)
-    print(f"🎉 총 {len(all_articles)}개 조문 수집 완료! (조 단위 청킹)")
-    print(f"✅ 성공한 법령: {success_count}/{len(MAJOR_LAWS)}개")
-    print(f"⚠️ 실패한 법령: {len(failed_laws)}개")
+    print(f"[DONE] 총 {len(all_articles)}개 조문 수집 완료! (조 단위 청킹)")
+    print(f"[OK] 성공한 법령: {success_count}/{len(MAJOR_LAWS)}개")
+    print(f"[WARN] 실패한 법령: {len(failed_laws)}개")
     if failed_laws:
         print(f"   실패 목록:")
         for law in failed_laws:
@@ -262,16 +262,16 @@ def collect_law_articles() -> List[Dict]:
 def generate_embeddings(articles: List[Dict]) -> tuple:
     """임베딩 생성"""
     print("\n" + "="*60)
-    print("🧠 임베딩 모델 로드 중...")
+    print("[LOAD] 임베딩 모델 로드 중...")
     print("="*60 + "\n")
 
     model = SentenceTransformer('intfloat/multilingual-e5-large-instruct')
 
-    print("✅ 모델 로드 완료!")
-    print(f"📊 임베딩 차원: {model.get_sentence_embedding_dimension()}")
+    print("[OK] 모델 로드 완료!")
+    print(f"[INFO] 임베딩 차원: {model.get_sentence_embedding_dimension()}")
 
     print("\n" + "="*60)
-    print("🔮 임베딩 생성 중...")
+    print("[EMBED] 임베딩 생성 중...")
     print("="*60 + "\n")
 
     embeddings = []
@@ -291,8 +291,8 @@ def generate_embeddings(articles: List[Dict]) -> tuple:
 
     embeddings = np.array(embeddings)
 
-    print(f"\n✅ 임베딩 생성 완료!")
-    print(f"📊 Shape: {embeddings.shape}")
+    print(f"\n[OK] 임베딩 생성 완료!")
+    print(f"[INFO] Shape: {embeddings.shape}")
 
     return embeddings, model
 
@@ -305,26 +305,26 @@ def upload_to_supabase(
 ):
     """Supabase에 업로드"""
     print("\n" + "="*60)
-    print("☁️ Supabase 업로드 중...")
+    print("[UPLOAD] Supabase 업로드 중...")
     print("="*60 + "\n")
 
     supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
     # 기존 데이터 삭제
     if clear_existing:
-        print("🗑️ 기존 데이터 삭제 중...")
+        print("[DELETE] 기존 데이터 삭제 중...")
         try:
             result = supabase.table(table_name).delete().neq('id', 0).execute()
-            print("✅ 기존 데이터 삭제 완료!")
+            print("[OK] 기존 데이터 삭제 완료!")
         except Exception as e:
-            print(f"⚠️ 삭제 실패: {e}")
+            print(f"[WARN] 삭제 실패: {e}")
 
     # 업로드
     batch_size = 50
     upload_count = 0
     failed_count = 0
 
-    print(f"\n📤 업로드 시작... (총 {len(embeddings)}개)")
+    print(f"\n[START] 업로드 시작... (총 {len(embeddings)}개)")
 
     for i in tqdm(range(0, len(embeddings), batch_size), desc="업로드"):
         batch_embeddings = embeddings[i:i+batch_size]
@@ -346,7 +346,7 @@ def upload_to_supabase(
             except Exception as e:
                 failed_count += 1
                 if failed_count <= 3:
-                    print(f"\n⚠️ 실패: {meta['law_name']} {meta['article']}")
+                    print(f"\n[WARN] 실패: {meta['law_name']} {meta['article']}")
                     error_msg = str(e)
                     if len(error_msg) > 100:
                         error_msg = error_msg[:100] + "..."
@@ -355,9 +355,9 @@ def upload_to_supabase(
         time.sleep(0.5)
 
     print(f"\n" + "="*60)
-    print(f"🎉 업로드 완료!")
-    print(f"✅ 성공: {upload_count}/{len(embeddings)}개")
-    print(f"⚠️ 실패: {failed_count}개")
+    print(f"[DONE] 업로드 완료!")
+    print(f"[OK] 성공: {upload_count}/{len(embeddings)}개")
+    print(f"[WARN] 실패: {failed_count}개")
     print("="*60)
 
 
@@ -365,7 +365,7 @@ def main():
     """메인 실행 함수"""
     # 환경변수 확인
     if not all([LAW_API_OC, SUPABASE_URL, SUPABASE_ANON_KEY]):
-        print("❌ 환경변수를 확인해주세요:")
+        print("[ERROR] 환경변수를 확인해주세요:")
         print("   - LAW_API_OC")
         print("   - SUPABASE_URL")
         print("   - SUPABASE_ANON_KEY")
@@ -375,7 +375,7 @@ def main():
     articles = collect_law_articles()
 
     if not articles:
-        print("❌ 수집된 조문이 없습니다!")
+        print("[ERROR] 수집된 조문이 없습니다!")
         return
 
     # 2. 임베딩 생성
@@ -391,7 +391,7 @@ def main():
 
     # 4. 샘플 테스트
     print("\n" + "="*60)
-    print("🧪 샘플 검색 테스트...")
+    print("[TEST] 샘플 검색 테스트...")
     print("="*60 + "\n")
 
     test_query = "야근수당은 얼마나 받을 수 있나요?"
@@ -415,7 +415,7 @@ def main():
         print(f"내용: {article['content'][:100]}...")
 
     print("\n" + "="*60)
-    print("✅ 모든 작업 완료! 🎉")
+    print("[DONE] 모든 작업 완료!")
     print("="*60)
 
 
