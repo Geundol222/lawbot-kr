@@ -11,7 +11,7 @@ pinned: false
 
 [![CI](https://github.com/Geundol222/lawbot-kr/actions/workflows/ci.yml/badge.svg)](https://github.com/Geundol222/lawbot-kr/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Geundol222/lawbot-kr/actions/workflows/deploy.yml/badge.svg)](https://github.com/Geundol222/lawbot-kr/actions/workflows/deploy.yml)
-[![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 벡터 검색과 Agentic RAG를 결합한 한국 법령 상담 AI 챗봇
@@ -396,7 +396,7 @@ pip install pytest-pythonpath
 **CI (Continuous Integration):**
 - PR 생성 시 자동 테스트 실행
 - 코드 품질 검사 (flake8, black, mypy)
-- Python 3.10, 3.11, 3.12 매트릭스 테스트
+- Python 3.12 테스트
 - 커버리지 리포트 생성
 
 **CD (Continuous Deployment):**
@@ -480,7 +480,7 @@ git push origin main
   - 객체지향 설계 원칙 적용, 유지보수성 대폭 향상
 - ✅ **LLM 설정 간소화**: 중복 인스턴스 제거, 메모리 효율화
 - ✅ **CI/CD 파이프라인**: pytest + GitHub Actions 자동 테스트 & 배포
-  - Unit/Integration 테스트 (Python 3.10, 3.11, 3.12)
+  - Unit/Integration 테스트 (Python 3.12)
   - 코드 품질 검사 (flake8, black, isort, mypy)
   - main 브랜치 → 자동 배포 (HuggingFace + Vercel)
 
