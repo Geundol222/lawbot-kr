@@ -414,7 +414,25 @@ class AgenticRAG:
             last_node_output = list(final_state.values())[-1]
             messages = last_node_output.get("messages", [])
 
-            # 2단계: 최종 답변 생성 (LLM 스트리밍)
+            # 마지막 메시지가 AI의 답변이면 그것을 스트리밍
+            last_msg = messages[-1]
+            if hasattr(last_msg, 'content') and isinstance(last_msg.content, str):
+                # 이미 생성된 답변을 청크로 나누어 yield
+                answer_text = last_msg.content
+                print("📝 답변 생성 완료, 스트리밍 중...")
+
+                # 5자씩 나누어 스트리밍 (타이핑 효과)
+                chunk_size = 5
+                for i in range(0, len(answer_text), chunk_size):
+                    chunk_text = answer_text[i:i+chunk_size]
+                    print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
+                    full_answer += chunk_text
+                    yield chunk_text
+
+                # try 블록 종료
+                raise StopIteration
+
+            # 2단계: 최종 답변 생성 (LLM 스트리밍) - 위에서 이미 답변이 있으면 여기 도달 안함
             # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
             print("📝 답변 생성 중 (스트리밍)...")
 
