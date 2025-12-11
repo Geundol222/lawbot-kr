@@ -1,4 +1,5 @@
 import os
+from uuid import UUID, uuid4
 from supabase import create_client, Client
 
 from src.config import SUPABASE_KEY, SUPABASE_URL
@@ -12,10 +13,22 @@ print(f"✅ Supabase KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
+def _normalize_session_id(session_id: str) -> str:
+    """
+    Supabase 컬럼 타입이 UUID일 때, 비-UUID 문자열을 안전하게 변환한다.
+    """
+    try:
+        UUID(session_id)
+        return session_id
+    except Exception:
+        return str(uuid4())
+
+
 def save_conversation(session_id: str, user_question: str, bot_answer: str,
                      law_name: str = None, article: str = None,
                      response_time_ms: int = None):
     """대화 로그 저장"""
+    session_id = _normalize_session_id(session_id)
     try:
         # 세션 확인 또는 생성
         session = supabase.table("sessions")\
