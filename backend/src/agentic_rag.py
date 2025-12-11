@@ -1,16 +1,13 @@
-from typing import TypedDict, List, Annotated, Optional
-from uuid import uuid4
+"""
+Agentic RAG 시스템
+- 도구 정의
+- 그래프 구성
+- 실행 인터페이스
+"""
+
+from typing import Optional
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
-from langchain_core.messages import (
-    HumanMessage,
-    AIMessage,
-    ToolMessage,
-    SystemMessage,
-    convert_to_messages,
-)
 from langchain.tools import tool
-import time
 
 from src.embeddings.vector_search import VectorSearch
 from src.law_api import (
@@ -21,8 +18,11 @@ from src.law_api import (
     extract_article_content
 )
 from src.config import get_llm
-from src.supabase_client import save_conversation
 from src.monitoring import get_wandb_logger, AgenticRAGLogger
+from src.agent_state import AgentState
+from src.agent_nodes import AgentNodes
+from src.agent_streaming import AgentStreaming
+
 
 # ========================================
 # Tools 정의
@@ -157,24 +157,13 @@ def search_law_by_api(law_name: str, article_number: str = None) -> str:
 
 
 # ========================================
-# State 정의
-# ========================================
-
-class AgentState(TypedDict):
-    messages: Annotated[List, "messages"]
-    question: str
-    tool_calls: int  # 방어용: 무한 반복 방지
-
-# ========================================
 # Agent 정의
 # ========================================
 
 class AgenticRAG:
     def __init__(self):
-        # Tool calling용 LLM (정확한 판단 필요)
-        self.llm_tools = get_llm("tool_calling")
-        # 답변 생성용 LLM (빠른 생성)
-        self.llm_generation = get_llm("generation")
+        # 단일 LLM 사용 (Gemini 2.5 Flash)
+        self.llm = get_llm("flash")
 
         # ⭐ Tools 바인딩 ⭐
         self.tools = [
@@ -182,9 +171,7 @@ class AgenticRAG:
             get_full_article_content,
             search_law_by_api
         ]
-        # Tool calling은 Thinking 모델 사용
-        self.llm_with_tools = self.llm_tools.bind_tools(self.tools)
-        self.graph = self._build_graph()
+        self.llm_with_tools = self.llm.bind_tools(self.tools)
 
         # WandB 로거 초기화
         try:
@@ -192,23 +179,37 @@ class AgenticRAG:
         except Exception:
             self.wandb_logger = None
 
-        # 도구 실행 시간 추적
-        self.tool_execution_times = {}
-    
+        # 노드 로직
+        self.nodes = AgentNodes(
+            llm_with_tools=self.llm_with_tools,
+            tools=self.tools,
+            wandb_logger=self.wandb_logger
+        )
+
+        # 그래프 빌드
+        self.graph = self._build_graph()
+
+        # 스트리밍 로직
+        self.streaming = AgentStreaming(
+            graph=self.graph,
+            llm=self.llm,
+            wandb_logger=self.wandb_logger
+        )
+
     def _build_graph(self):
         """LangGraph 구성"""
         workflow = StateGraph(AgentState)
 
         # 노드
-        workflow.add_node("agent", self.call_agent)
-        workflow.add_node("tools", self.execute_tools)
+        workflow.add_node("agent", self.nodes.call_agent)
+        workflow.add_node("tools", self.nodes.execute_tools)
 
         # 플로우
         workflow.set_entry_point("agent")
 
         workflow.add_conditional_edges(
             "agent",
-            self.should_continue,
+            self.nodes.should_continue,
             {
                 "continue": "tools",
                 "end": END
@@ -219,121 +220,10 @@ class AgenticRAG:
 
         return workflow.compile()
 
-    def execute_tools(self, state: AgentState) -> AgentState:
-        """도구 실행 (ToolNode 대체)"""
-        messages = state['messages']
-        last_message = messages[-1]
-
-        # 도구 호출 실행
-        tool_messages = []
-        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            for tool_call in last_message.tool_calls:
-                tool_name = tool_call['name']
-                tool_args = tool_call['args']
-                tool_id = tool_call['id']
-
-                # 도구 실행
-                for tool in self.tools:
-                    if tool.name == tool_name:
-                        start_time = time.time()
-                        success = True
-                        result_str = ""
-
-                        try:
-                            result = tool.invoke(tool_args)
-                            result_str = str(result)
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=result_str,
-                                    tool_call_id=tool_id
-                                )
-                            )
-                        except Exception as e:
-                            success = False
-                            result_str = f"도구 실행 오류: {str(e)}"
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=result_str,
-                                    tool_call_id=tool_id
-                                )
-                            )
-
-                        execution_time = time.time() - start_time
-
-                        # WandB 로깅
-                        if self.wandb_logger:
-                            self.wandb_logger.log_tool_call(
-                                tool_name=tool_name,
-                                args=tool_args,
-                                result_preview=result_str[:200],
-                                execution_time=execution_time,
-                                success=success
-                            )
-
-                        break
-
-        return {
-            "messages": messages + tool_messages,
-            "question": state.get("question", ""),
-            "tool_calls": state.get("tool_calls", 0),
-        }
-    
     # ========================================
-    # 노드 구현
+    # 실행 인터페이스
     # ========================================
-    
-    def call_agent(self, state: AgentState) -> AgentState:
-        """Agent 호출"""
-        # LangGraph 상태가 dict/list 등으로 변할 수 있어 확실히 BaseMessage로 변환
-        messages = convert_to_messages(state['messages'])
 
-        # 방어적으로 사람이 쓴 메시지가 없으면 에러 방지
-        has_human = any(
-            isinstance(m, HumanMessage) or getattr(m, "type", "") == "human"
-            for m in messages
-        )
-        if not has_human:
-            messages.append(HumanMessage(content=state.get("question", "")))
-
-        # LLM이 도구 선택!
-        response = self.llm_with_tools.invoke(messages)
-
-        tool_calls_count = state.get("tool_calls", 0)
-        if getattr(response, "tool_calls", None):
-            # 도구 호출 개수만큼 카운트 증가
-            num_calls = len(response.tool_calls)
-            tool_calls_count += num_calls
-            # 어떤 도구가 호출되는지 로깅
-            for tc in response.tool_calls:
-                print(f"🔧 도구 호출: {tc['name']}({', '.join(f'{k}={v}' for k, v in tc['args'].items())})")
-
-        # 메시지 추가
-        return {
-            "messages": messages + [response],
-            "question": state.get("question", ""),
-            "tool_calls": tool_calls_count,
-        }
-    
-    def should_continue(self, state: AgentState) -> str:
-        """도구 실행 필요?"""
-        messages = state['messages']
-        last_message = messages[-1]
-
-        # 무한 루프 방지: 최대 10회 (벡터검색 → 조문조회 → API검색 → 재시도)
-        if state.get("tool_calls", 0) >= 10:
-            print("⚠️ 최대 도구 호출 횟수 도달, 종료합니다.")
-            return "end"
-
-        # ⭐ Function Calling 확인 ⭐
-        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            return "continue"
-
-        return "end"
-    
-    # ========================================
-    # 실행
-    # ========================================
-    
     def run(self, question: str, session_id: Optional[str] = None) -> str:
         """Agent 실행 (non-streaming, backward compatibility)"""
         # 스트리밍을 내부적으로 실행하고 전체 결과만 반환
@@ -344,158 +234,4 @@ class AgenticRAG:
 
     def run_stream(self, question: str, session_id: Optional[str] = None):
         """Agent 실행 (streaming)"""
-        start_time = time.time()
-        print(f"\n{'='*60}")
-        print(f"🤖 Agentic RAG 시작 (스트리밍)")
-        print(f"❓ 질문: {question}")
-        print(f"{'='*60}\n")
-
-        # 세션 아이디 없으면 새로 발급 (대화 기록용)
-        session_id = session_id or str(uuid4())
-        # 이전 검색 결과 초기화 (로그 저장용)
-        vector_search_instance.last_results = []
-
-        # WandB 세션 시작
-        if self.wandb_logger:
-            self.wandb_logger.start_session(question)
-
-        # 초기 메시지
-        initial_messages = [
-            SystemMessage(
-                content="""한국 법률 상담 AI입니다. 반드시 아래 단계를 따라 작업하세요:
-
-1단계: search_vector_db(질문)로 벡터 DB 검색
-
-2단계:
-  A. 벡터 검색 성공 시 (유사도 0.7 이상):
-     → 검색 결과에 "내용" 필드가 포함되어 있습니다
-     → 즉시 해당 내용으로 답변 작성 (추가 도구 호출 금지!)
-     → get_full_article_content 호출하지 마세요!
-
-  B. 벡터 검색 실패 시 (VECTOR_DB_NO_MATCH):
-     → search_law_by_api(법령명)로 API 검색
-     → 예: "택배 분실" → search_law_by_api("전자상거래법")
-
-3단계: 조회한 법령 내용으로 답변 작성
-
-답변 형식:
-- 요약
-- 근거 법령 (법령명 + 조문)
-- 조문 내용
-
-중요 규칙:
-1. 벡터 검색 결과에 "내용"이 있으면 바로 답변 작성! (API 호출 금지)
-2. get_full_article_content는 특별한 경우에만 사용 (벡터 검색에서 내용이 없을 때)
-3. 동일한 도구를 반복 호출하지 마세요"""
-            ),
-            HumanMessage(content=question)
-        ]
-
-        initial_state = {
-            "messages": initial_messages,
-            "question": question,
-            "tool_calls": 0,
-        }
-
-        full_answer = ""
-
-        try:
-            # 1단계: Tool calling 완료까지 실행 (non-streaming)
-            graph_start = time.time()
-            print("⏱️  그래프 실행 시작...")
-
-            final_state = None
-            for event in self.graph.stream(initial_state):
-                final_state = event
-
-            graph_time = time.time() - graph_start
-            print(f"⏱️  그래프 실행 완료: {graph_time:.2f}초")
-
-            # 마지막 상태에서 메시지 추출
-            if not final_state:
-                yield "오류: 응답을 생성할 수 없습니다."
-                return
-
-            # 가장 마지막 노드의 출력 가져오기
-            last_node_output = list(final_state.values())[-1]
-            messages = last_node_output.get("messages", [])
-
-            # 마지막 메시지가 AI의 답변이면 그것을 스트리밍
-            last_msg = messages[-1]
-            if hasattr(last_msg, 'content') and isinstance(last_msg.content, str):
-                # 이미 생성된 답변을 청크로 나누어 스트리밍 (지연 없이)
-                answer_text = last_msg.content
-                print(f"📝 답변 생성 완료 ({len(answer_text)}자), 스트리밍 중...")
-
-                # 10자씩 묶어서 스트리밍 (프론트엔드에서 타이핑 효과 처리)
-                chunk_size = 10
-                for i in range(0, len(answer_text), chunk_size):
-                    chunk_text = answer_text[i:i+chunk_size]
-                    full_answer += chunk_text
-                    yield chunk_text
-            else:
-                # 2단계: 최종 답변 생성 (LLM 스트리밍) - 답변이 아직 없는 경우
-                # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
-                print("📝 답변 생성 중 (스트리밍)...")
-
-                for chunk in self.llm_generation.stream(messages):
-                    # Gemini의 응답 형식 처리
-                    chunk_text = ""
-
-                    if hasattr(chunk, 'content'):
-                        content = chunk.content
-
-                        # 빈 content 체크
-                        if not content:
-                            continue
-
-                        # 리스트 형식 처리
-                        if isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict) and 'text' in part:
-                                    chunk_text += part['text']
-                        # 문자열 형식 처리
-                        elif isinstance(content, str):
-                            chunk_text = content
-                        else:
-                            chunk_text = str(content)
-
-                        # 디버깅 로그
-                        if chunk_text:
-                            print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
-                            full_answer += chunk_text
-                            yield chunk_text
-
-        except Exception as e:
-            error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
-            yield error_msg
-            full_answer += error_msg
-
-        print(f"\n{'='*60}")
-        print(f"✅ 완료! (총 {len(full_answer)}자)")
-        print(f"{'='*60}\n")
-
-        # WandB 세션 종료 및 로깅
-        if self.wandb_logger:
-            total_tokens = len(question.split()) + len(full_answer.split())
-            self.wandb_logger.end_session(full_answer, total_tokens)
-
-        # Supabase 대화 로그 저장
-        try:
-            law_name = None
-            article = None
-            if vector_search_instance.last_results:
-                top = vector_search_instance.last_results[0]
-                law_name = top.get("law_name")
-                article = top.get("article")
-
-            save_conversation(
-                session_id=session_id,
-                user_question=question,
-                bot_answer=full_answer,
-                law_name=law_name,
-                article=article,
-                response_time_ms=int((time.time() - start_time) * 1000)
-            )
-        except Exception as e:
-            print(f"⚠️ Supabase 대화 저장 실패: {e}")
+        return self.streaming.run_stream(question, session_id)

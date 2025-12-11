@@ -64,38 +64,28 @@ LAW_KEY = {
 # LLM 인스턴스 캐시 (싱글톤 패턴)
 _llm_instances = {}
 
-def get_llm(use_case: str = "generation"):
+def get_llm(model: str = "flash"):
     """
-    용도별 LLM 인스턴스 가져오기 (싱글톤 패턴)
+    LLM 인스턴스 가져오기 (싱글톤 패턴)
 
     Args:
-        use_case:
-            - "generation": 답변 생성 (Gemini 2.5 Flash - 빠르고 저렴)
-            - "tool_calling": Function calling, 복잡한 추론 (Gemini 2.0 Flash Thinking - 정확)
-            - "judge_exception": 예외 조항 탐지 (Gemini 2.5 Flash Lite - 초고속/초저가)
+        model:
+            - "flash": Gemini 2.5 Flash (기본, 빠르고 저렴)
+            - "flash-lite": Gemini 2.5 Flash Lite (초경량)
     """
     global _llm_instances
 
-    if use_case not in _llm_instances:
+    if model not in _llm_instances:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        if use_case == "tool_calling":
-            # Function calling과 복잡한 추론은 Thinking 모델
-            _llm_instances[use_case] = ChatGoogleGenerativeAI(
-                model='gemini-2.5-pro',
-                temperature=0.0
-            )
-        elif use_case == "generation":
-            # 답변 생성은 빠른 Flash
-            _llm_instances[use_case] = ChatGoogleGenerativeAI(
-                model='gemini-2.5-flash',
-                temperature=0.0
-            )
-        elif use_case == "judge_exception":
-            # 예외 조항, 적용 범위 탐지는 초경량 Flash Lite
-            _llm_instances[use_case] = ChatGoogleGenerativeAI(
-                model='gemini-2.5-flash-lite',
-                temperature=0.0
-            )
+        model_map = {
+            "flash": "gemini-2.5-flash",
+            "flash-lite": "gemini-2.5-flash-lite",
+        }
 
-    return _llm_instances[use_case]
+        _llm_instances[model] = ChatGoogleGenerativeAI(
+            model=model_map.get(model, "gemini-2.5-flash"),
+            temperature=0.0
+        )
+
+    return _llm_instances[model]
