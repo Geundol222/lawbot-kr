@@ -32,7 +32,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    agent = AgenticRAG()
+    # CLI 모드에서는 기본 세션 ID 사용
+    agent = AgenticRAG(session_id="cli-session")
 
     if args.question:
         run_once(agent, args.question)
