@@ -110,8 +110,11 @@ class AgentStreaming:
                         yield chunk_text
 
         except Exception as e:
+            import traceback
             error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
             print(f"❌ 오류: {e}")
+            print(f"❌ 상세 traceback:")
+            traceback.print_exc()
             yield error_msg
             full_answer += error_msg
 
@@ -145,7 +148,7 @@ class AgentStreaming:
             print(f"⚠️ Supabase 대화 저장 실패: {e}")
 
     def run_stream(self, question: str, session_id: Optional[str] = None):
-        """Agent 실행 (streaming) - sync wrapper"""
+        """Agent 실행 (streaming) - sync wrapper using asyncio.run"""
         start_time = time.time()
         print(f"\n{'='*60}")
         print(f"🤖 Agentic RAG 시작 (실시간 스트리밍)")
@@ -161,18 +164,31 @@ class AgentStreaming:
         if self.wandb_logger:
             self.wandb_logger.start_session(question)
 
-        # async 제너레이터를 sync로 변환
-        async_gen = self._run_stream_async(question, session_id, start_time)
+        # async 제너레이터를 sync로 변환 - 더 안정적인 방법
+        import nest_asyncio
+        try:
+            nest_asyncio.apply()
+        except:
+            pass
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+        async def collect_chunks():
+            chunks = []
+            try:
+                async for chunk in self._run_stream_async(question, session_id, start_time):
+                    chunks.append(chunk)
+            except Exception as e:
+                import traceback
+                print(f"❌ Async 오류: {e}")
+                traceback.print_exc()
+                chunks.append(f"\n\n❌ 오류: {str(e)}\n")
+            return chunks
+
         try:
-            while True:
-                try:
-                    chunk = loop.run_until_complete(async_gen.__anext__())
-                    yield chunk
-                except StopAsyncIteration:
-                    break
+            chunks = loop.run_until_complete(collect_chunks())
+            for chunk in chunks:
+                yield chunk
         finally:
             loop.close()
