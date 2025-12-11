@@ -50,3 +50,5 @@ frontend/.next/
 frontend/out/
 frontend/build/
 frontend/.env*.local
+.vercel
+.env*.local

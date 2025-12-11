@@ -11,7 +11,7 @@ pinned: false
 
 [![CI](https://github.com/Geundol222/lawbot-kr/actions/workflows/ci.yml/badge.svg)](https://github.com/Geundol222/lawbot-kr/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Geundol222/lawbot-kr/actions/workflows/deploy.yml/badge.svg)](https://github.com/Geundol222/lawbot-kr/actions/workflows/deploy.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 벡터 검색과 Agentic RAG를 결합한 한국 법령 상담 AI 챗봇
@@ -252,26 +252,38 @@ lawbot-kr/
 | **벡터 DB** | Supabase (pgvector, 코사인 유사도) |
 | **Agent** | LangGraph (StateGraph, Function Calling) |
 | **API** | 국가법령정보센터 Open API |
-| **모니터링** | WandB (메트릭, 테이블 로깅) |
+| **모니터링** | WandB (세션별 Run 전략) |
+| **테스트** | pytest (Unit/Integration) |
+| **CI/CD** | GitHub Actions (자동 테스트 & 배포) |
 | **백엔드** | FastAPI |
-| **프론트엔드** | Streamlit |
+| **프론트엔드** | Next.js + React (Vercel) |
 
 ---
 
-## 📊 WandB 실험 추적
+## 📊 WandB 로깅 전략 (v2.0)
 
-### 실험 실행
+### 세션 기반 로깅 구조
 
-```bash
-# 베이스라인 (v1.0)
-./scripts/run_experiment.sh 1.0 baseline streamlit
-
-# 청킹 적용 (v2.0)
-./scripts/run_experiment.sh 2.0 chunking streamlit
-
-# 최적화 버전 (v2.1)
-./scripts/run_experiment.sh 2.1 optimized streamlit
 ```
+Project: lawbot-kr
+  └─ Group: daily_20251211 (날짜별 자동 그룹화)
+      ├─ Run: session-abc123_143022 (사용자 A)
+      │   ├─ Step 1: 질문1 → 답변1
+      │   ├─ Step 2: 질문2 → 답변2
+      │   └─ Step 3: 질문3 → 답변3
+      │
+      └─ Run: session-xyz789_144530 (사용자 B)
+          ├─ Step 1: 질문1 → 답변1
+          └─ Step 2: 질문2 → 답변2
+```
+
+**주요 개선점**:
+- ✅ 날짜별 Group으로 시계열 트렌드 분석
+- ✅ 세션별 Run으로 사용자 대화 흐름 추적
+- ✅ Step으로 대화 턴 진행도 추적
+- ✅ 적당한 Run 수 (일 10~100개)
+
+자세한 내용은 [WandB 로깅 전략 문서](docs/WANDB_LOGGING_STRATEGY.md)를 참고하세요.
 
 ### 로깅 메트릭
 
@@ -384,7 +396,7 @@ pip install pytest-pythonpath
 **CI (Continuous Integration):**
 - PR 생성 시 자동 테스트 실행
 - 코드 품질 검사 (flake8, black, mypy)
-- Python 3.10, 3.11 매트릭스 테스트
+- Python 3.10, 3.11, 3.12 매트릭스 테스트
 - 커버리지 리포트 생성
 
 **CD (Continuous Deployment):**
@@ -412,16 +424,76 @@ GitHub 저장소 → Settings → Secrets and variables → Actions → New repo
 
 ---
 
+## 🌿 브랜치 전략
+
+### 워크플로우
+
+```
+main (프로덕션)
+  ↑
+  └─ develop (개발)
+      ↑
+      ├─ feature/new-ui
+      └─ fix/scroll-bug
+```
+
+### 브랜치별 동작
+
+| 브랜치 | CI 테스트 | CD 배포 | 용도 |
+|--------|----------|---------|------|
+| `main` | ✅ 자동 | ✅ 자동 (HF + Vercel) | 프로덕션 (실사용자) |
+| `develop` | ✅ 자동 | ❌ | 개발 & 통합 테스트 |
+| `feature/*` | ✅ PR시 | ❌ | 기능 개발 |
+
+### 배포 과정
+
+```bash
+# 1. feature 브랜치에서 개발
+git checkout -b feature/session-logging
+# ... 코드 작성 ...
+git push origin feature/session-logging
+
+# 2. PR 생성: feature → develop
+# → CI 자동 실행 (테스트만)
+
+# 3. develop에서 테스트
+git checkout develop
+git merge feature/session-logging
+# → CI 자동 실행 (테스트만)
+
+# 4. 배포 준비되면 main으로
+git checkout main
+git merge develop
+git push origin main
+# → CI + CD 자동 실행 (배포!)
+```
+
+---
+
 ## 🎯 주요 개선 사항
 
-### v2.0 (모듈화 및 스트리밍 완성) - 2025.12.11
-- ✅ **코드 모듈화**: `agentic_rag.py` 509줄 → 238줄 (53% 감소)
+### v2.0 (모듈화 및 품질 강화) - 2025.12.11
+
+**코드 품질**:
+- ✅ **모듈화**: `agentic_rag.py` 509줄 → 238줄 (53% 감소)
   - 분리: `agent_state.py`, `agent_nodes.py`, `agent_streaming.py`
   - 객체지향 설계 원칙 적용, 유지보수성 대폭 향상
 - ✅ **LLM 설정 간소화**: 중복 인스턴스 제거, 메모리 효율화
-- ✅ **자연스러운 스트리밍**: 1자씩 30ms 간격 타이핑 효과
-- ✅ **성능 최적화**: gemini-2.5-pro → flash (그래프 실행 12초 → 3-6초 예상)
-- ✅ **CI/CD 파이프라인**: pytest 테스트 + GitHub Actions 자동화
+- ✅ **CI/CD 파이프라인**: pytest + GitHub Actions 자동 테스트 & 배포
+  - Unit/Integration 테스트 (Python 3.10, 3.11, 3.12)
+  - 코드 품질 검사 (flake8, black, isort, mypy)
+  - main 브랜치 → 자동 배포 (HuggingFace + Vercel)
+
+**사용자 경험**:
+- ✅ **자연스러운 스트리밍**: 1자씩 30ms 간격 타이핑 효과 (ChatGPT 수준)
+- ✅ **스크롤 UX 개선**: 사용자 스크롤 감지, "아래로 이동" 버튼
+
+**모니터링**:
+- ✅ **WandB 로깅 전략 개선**: 세션별 Run, 날짜별 Group, 대화 턴별 Step
+  - 기존: 전체 1개 run → 개선: 일 10~100개 run (사용자별 추적)
+
+**성능**:
+- ✅ **LLM 최적화**: gemini-2.5-pro → flash (그래프 실행 12초 → 3-6초)
 - ✅ **조 단위 청킹**: 법령을 조문 단위로 분할하여 임베딩
 - ✅ **벡터 검색 최적화**: 조문 내용 포함, API 호출 3회 절약
 - ✅ **Agent 프롬프트 개선**: 불필요한 도구 호출 제거, 도구 호출 제한 10회
