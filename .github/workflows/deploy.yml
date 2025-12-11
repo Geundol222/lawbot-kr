@@ -1,0 +1,95 @@
+name: CD - Auto Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  deploy-huggingface:
+    name: Deploy to HuggingFace Spaces
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 전체 히스토리 가져오기
+
+    - name: Push to HuggingFace Spaces
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME }}  # 예: "username/lawbot-kr"
+      run: |
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+
+        # HuggingFace remote 추가 (이미 있으면 무시)
+        git remote add hf https://huggingface.co/spaces/$HF_SPACE_NAME || true
+
+        # HuggingFace에 푸시 (토큰 사용)
+        git push https://user:$HF_TOKEN@huggingface.co/spaces/$HF_SPACE_NAME main --force
+
+    - name: Comment on commit
+      uses: peter-evans/commit-comment@v3
+      with:
+        body: |
+          🚀 **Deployed to HuggingFace Spaces**
+
+          View your app at: https://huggingface.co/spaces/${{ secrets.HF_SPACE_NAME }}
+
+  deploy-vercel:
+    name: Deploy to Vercel (Frontend)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install Vercel CLI
+      run: npm install --global vercel@latest
+
+    - name: Pull Vercel Environment Information
+      run: |
+        cd frontend
+        vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+    - name: Build Project Artifacts
+      run: |
+        cd frontend
+        vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+    - name: Deploy to Vercel
+      run: |
+        cd frontend
+        vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+    - name: Comment on commit
+      uses: peter-evans/commit-comment@v3
+      with:
+        body: |
+          ✨ **Deployed to Vercel**
+
+          Your frontend is live!
+
+  notify:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-huggingface, deploy-vercel]
+    if: always()
+
+    steps:
+    - name: Deployment Status
+      run: |
+        echo "🎉 Deployment workflow completed!"
+        echo "HuggingFace Status: ${{ needs.deploy-huggingface.result }}"
+        echo "Vercel Status: ${{ needs.deploy-vercel.result }}"
