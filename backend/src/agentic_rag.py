@@ -397,39 +397,46 @@ class AgenticRAG:
             "tool_calls": 0,
         }
 
-        # LangGraph 스트리밍 실행
         full_answer = ""
 
         try:
+            # 1단계: Tool calling 완료까지 실행 (non-streaming)
+            final_state = None
             for event in self.graph.stream(initial_state):
-                # 각 노드의 출력 확인
-                for node_name, node_output in event.items():
-                    if node_name == "agent":
-                        # Agent 노드에서 메시지 추출
-                        messages = node_output.get("messages", [])
-                        if messages:
-                            last_message = messages[-1]
+                final_state = event
 
-                            # AIMessage인 경우만 처리
-                            if hasattr(last_message, 'content'):
-                                content = last_message.content
+            # 마지막 상태에서 메시지 추출
+            if not final_state:
+                yield "오류: 응답을 생성할 수 없습니다."
+                return
 
-                                # 리스트 형식 처리 (Gemini)
-                                if isinstance(content, list):
-                                    text_parts = [
-                                        part.get('text', '')
-                                        for part in content
-                                        if isinstance(part, dict) and 'text' in part
-                                    ]
-                                    content = '\n'.join(text_parts)
-                                else:
-                                    content = str(content)
+            # 가장 마지막 노드의 출력 가져오기
+            last_node_output = list(final_state.values())[-1]
+            messages = last_node_output.get("messages", [])
 
-                                # 이미 출력한 부분 제외하고 새로운 부분만 yield
-                                if content and len(content) > len(full_answer):
-                                    new_content = content[len(full_answer):]
-                                    full_answer = content
-                                    yield new_content
+            # 2단계: 최종 답변 생성 (LLM 스트리밍)
+            # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
+            print("📝 답변 생성 중 (스트리밍)...")
+
+            for chunk in self.llm_generation.stream(messages):
+                # Gemini의 응답 형식 처리
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+
+                    # 리스트 형식 처리
+                    if isinstance(content, list):
+                        text_parts = [
+                            part.get('text', '')
+                            for part in content
+                            if isinstance(part, dict) and 'text' in part
+                        ]
+                        chunk_text = ''.join(text_parts)
+                    else:
+                        chunk_text = str(content)
+
+                    if chunk_text:
+                        full_answer += chunk_text
+                        yield chunk_text
 
         except Exception as e:
             error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
