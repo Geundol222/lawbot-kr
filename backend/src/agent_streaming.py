@@ -4,6 +4,7 @@ Agent 스트리밍 로직
 """
 
 import time
+import asyncio
 from uuid import uuid4
 from typing import Optional
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -29,22 +30,10 @@ class AgentStreaming:
         self.llm = llm
         self.wandb_logger = wandb_logger
 
-    def run_stream(self, question: str, session_id: Optional[str] = None):
-        """Agent 실행 (streaming)"""
-        start_time = time.time()
-        print(f"\n{'='*60}")
-        print(f"🤖 Agentic RAG 시작 (스트리밍)")
-        print(f"❓ 질문: {question}")
-        print(f"{'='*60}\n")
-
-        # 세션 아이디 없으면 새로 발급 (대화 기록용)
-        session_id = session_id or str(uuid4())
-        # 이전 검색 결과 초기화 (로그 저장용)
-        vector_search_instance.last_results = []
-
-        # WandB 세션 시작
-        if self.wandb_logger:
-            self.wandb_logger.start_session(question)
+    async def _run_stream_async(self, question: str, session_id: str, start_time: float):
+        """내부 async 스트리밍 로직"""
+        full_answer = ""
+        is_streaming = False
 
         # 초기 메시지
         initial_messages = [
@@ -84,77 +73,50 @@ class AgentStreaming:
             "tool_calls": 0,
         }
 
-        full_answer = ""
-
         try:
-            # 1단계: Tool calling 완료까지 실행 (non-streaming)
+            # LangGraph astream_events를 사용해서 LLM 토큰 레벨 스트리밍
             graph_start = time.time()
-            print("⏱️  그래프 실행 시작...")
+            print("⏱️  그래프 실행 시작 (실시간 스트리밍 모드)...")
 
-            final_state = None
-            for event in self.graph.stream(initial_state):
-                final_state = event
+            async for event in self.graph.astream_events(initial_state, version="v2"):
+                event_type = event.get("event")
 
-            graph_time = time.time() - graph_start
-            print(f"⏱️  그래프 실행 완료: {graph_time:.2f}초")
+                # on_chat_model_stream: LLM이 토큰을 생성할 때마다 발생
+                if event_type == "on_chat_model_stream":
+                    if not is_streaming:
+                        graph_time = time.time() - graph_start
+                        print(f"⏱️  Tool calling 완료: {graph_time:.2f}초")
+                        print("📝 답변 생성 중 (실시간 스트리밍)...")
+                        is_streaming = True
 
-            # 마지막 상태에서 메시지 추출
-            if not final_state:
-                yield "오류: 응답을 생성할 수 없습니다."
-                return
-
-            # 가장 마지막 노드의 출력 가져오기
-            last_node_output = list(final_state.values())[-1]
-            messages = last_node_output.get("messages", [])
-
-            # 마지막 메시지가 AI의 답변이면 그것을 스트리밍
-            last_msg = messages[-1]
-            if hasattr(last_msg, 'content') and isinstance(last_msg.content, str):
-                # 이미 생성된 답변을 청크로 나누어 스트리밍 (지연 없이)
-                answer_text = last_msg.content
-                print(f"📝 답변 생성 완료 ({len(answer_text)}자), 스트리밍 중...")
-
-                # 10자씩 묶어서 스트리밍 (프론트엔드에서 타이핑 효과 처리)
-                chunk_size = 10
-                for i in range(0, len(answer_text), chunk_size):
-                    chunk_text = answer_text[i:i+chunk_size]
-                    full_answer += chunk_text
-                    yield chunk_text
-            else:
-                # 2단계: 최종 답변 생성 (LLM 스트리밍) - 답변이 아직 없는 경우
-                # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
-                print("📝 답변 생성 중 (스트리밍)...")
-
-                for chunk in self.llm.stream(messages):
-                    # Gemini의 응답 형식 처리
-                    chunk_text = ""
-
-                    if hasattr(chunk, 'content'):
+                    # 청크 데이터 추출
+                    chunk = event.get("data", {}).get("chunk", None)
+                    if chunk and hasattr(chunk, 'content'):
                         content = chunk.content
 
-                        # 빈 content 체크
+                        # 빈 content 건너뛰기
                         if not content:
                             continue
 
-                        # 리스트 형식 처리
+                        # 텍스트 추출
+                        chunk_text = ""
                         if isinstance(content, list):
                             for part in content:
                                 if isinstance(part, dict) and 'text' in part:
                                     chunk_text += part['text']
-                        # 문자열 형식 처리
                         elif isinstance(content, str):
                             chunk_text = content
                         else:
                             chunk_text = str(content)
 
-                        # 디버깅 로그
                         if chunk_text:
-                            print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
+                            print(f"📤 Token: {chunk_text[:30]}...")
                             full_answer += chunk_text
                             yield chunk_text
 
         except Exception as e:
             error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
+            print(f"❌ 오류: {e}")
             yield error_msg
             full_answer += error_msg
 
@@ -186,3 +148,36 @@ class AgentStreaming:
             )
         except Exception as e:
             print(f"⚠️ Supabase 대화 저장 실패: {e}")
+
+    def run_stream(self, question: str, session_id: Optional[str] = None):
+        """Agent 실행 (streaming) - sync wrapper"""
+        start_time = time.time()
+        print(f"\n{'='*60}")
+        print(f"🤖 Agentic RAG 시작 (실시간 스트리밍)")
+        print(f"❓ 질문: {question}")
+        print(f"{'='*60}\n")
+
+        # 세션 아이디 없으면 새로 발급 (대화 기록용)
+        session_id = session_id or str(uuid4())
+        # 이전 검색 결과 초기화 (로그 저장용)
+        vector_search_instance.last_results = []
+
+        # WandB 세션 시작
+        if self.wandb_logger:
+            self.wandb_logger.start_session(question)
+
+        # async 제너레이터를 sync로 변환
+        async_gen = self._run_stream_async(question, session_id, start_time)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            while True:
+                try:
+                    chunk = loop.run_until_complete(async_gen.__anext__())
+                    yield chunk
+                except StopAsyncIteration:
+                    break
+        finally:
+            loop.close()
