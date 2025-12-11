@@ -52,30 +52,34 @@ if prompt := st.chat_input("예: 민법 제750조 알려줘"):
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
 
-        with st.spinner("🔍 벡터 DB 검색 중..."):
-            try:
-                # AgenticRAG로 답변 생성
-                response = st.session_state.agent.run(
-                    prompt,
-                    session_id=st.session_state.session_id
-                )
+        try:
+            # 스트리밍 답변 생성
+            full_response = ""
 
-                # 타이핑 효과 (선택사항)
-                message_placeholder.markdown(response)
+            for chunk in st.session_state.agent.run_stream(
+                prompt,
+                session_id=st.session_state.session_id
+            ):
+                full_response += chunk
+                # 실시간으로 업데이트
+                message_placeholder.markdown(full_response + "▌")
 
-                # 응답 저장
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response
-                })
+            # 커서 제거하고 최종 답변 표시
+            message_placeholder.markdown(full_response)
 
-            except Exception as e:
-                error_msg = f"❌ 오류가 발생했습니다: {str(e)}"
-                message_placeholder.error(error_msg)
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_msg
-                })
+            # 응답 저장
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response
+            })
+
+        except Exception as e:
+            error_msg = f"❌ 오류가 발생했습니다: {str(e)}"
+            message_placeholder.error(error_msg)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": error_msg
+            })
 
 # 사이드바
 with st.sidebar:
