@@ -21,7 +21,7 @@ jobs:
         PR_EXISTS=$(gh pr list --head develop --base main --json number --jq length)
         echo "pr_exists=$PR_EXISTS" >> $GITHUB_OUTPUT
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
     - name: Create Pull Request
       if: steps.check-pr.outputs.pr_exists == '0'
@@ -54,7 +54,7 @@ jobs:
         PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
         echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
     - name: Get existing PR number
       if: steps.check-pr.outputs.pr_exists != '0'
@@ -63,7 +63,7 @@ jobs:
         PR_NUMBER=$(gh pr list --head develop --base main --json number --jq '.[0].number')
         echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
     - name: Wait for CI checks
       run: |
@@ -96,20 +96,20 @@ jobs:
           exit 1
         fi
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
-    - name: Auto-merge PR
+    - name: Enable auto-merge
       run: |
         PR_NUMBER=${{ steps.create-pr.outputs.pr_number || steps.get-pr.outputs.pr_number }}
-        echo "Merging PR #$PR_NUMBER..."
+        echo "Enabling auto-merge for PR #$PR_NUMBER..."
 
+        # GitHub의 auto-merge 기능 활성화
         gh pr merge $PR_NUMBER \
+          --auto \
           --merge \
-          --delete-branch=false \
-          --subject "🚀 Auto Deploy: develop → main" \
-          --body "Automatically merged after CI checks passed"
+          --delete-branch=false
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
     - name: Deployment notification
       if: success()

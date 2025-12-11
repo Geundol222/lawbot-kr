@@ -408,11 +408,17 @@ pip install pytest-pythonpath
 
 배포를 활성화하려면 다음 secrets을 설정하세요:
 
-1. **HuggingFace 배포:**
+1. **Auto-merge (Branch Protection 사용 시):**
+   - `PAT_TOKEN`: Personal Access Token (repo 권한 필요)
+   - Branch Protection Rules가 활성화된 경우 필수
+   - 생성 방법: GitHub Settings → Developer settings → Personal access tokens → Generate new token (classic)
+   - 권한: `repo` (Full control of private repositories) 선택
+
+2. **HuggingFace 배포:**
    - `HF_TOKEN`: HuggingFace API 토큰
    - `HF_SPACE_NAME`: Space 이름 (예: `username/lawbot-kr`)
 
-2. **Vercel 배포:**
+3. **Vercel 배포:**
    - `VERCEL_TOKEN`: Vercel 토큰
    - `VERCEL_ORG_ID`: 조직 ID
    - `VERCEL_PROJECT_ID`: 프로젝트 ID
@@ -421,6 +427,10 @@ pip install pytest-pythonpath
 ```
 GitHub 저장소 → Settings → Secrets and variables → Actions → New repository secret
 ```
+
+**PAT_TOKEN이 없으면?**
+- Branch Protection Rules 없이 사용하면 `GITHUB_TOKEN`으로 작동 (기본값)
+- Branch Protection Rules 사용 시 `PAT_TOKEN` 설정 필수
 
 ---
 
