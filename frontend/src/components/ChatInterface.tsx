@@ -43,22 +43,20 @@ export default function ChatInterface() {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
-    const userMessage: Message = {
-      role: 'user',
-      content: input,
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, userMessage]);
     const question = input;
     setInput('');
     setLoading(true);
 
     const startTime = Date.now();
 
-    // 임시 어시스턴트 메시지 (스트리밍으로 업데이트될 것)
-    const tempMessageIndex = messages.length + 1;
+    // 사용자 메시지 + 빈 어시스턴트 메시지를 한번에 추가
     setMessages(prev => [
       ...prev,
+      {
+        role: 'user',
+        content: question,
+        timestamp: new Date(),
+      },
       {
         role: 'assistant',
         content: '',
@@ -74,12 +72,12 @@ export default function ChatInterface() {
           question,
           session_id: sessionId,
         },
-        // onChunk: 청크가 올 때마다 업데이트
+        // onChunk: 청크가 올 때마다 마지막 메시지 업데이트
         (chunk: string) => {
           fullResponse += chunk;
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[tempMessageIndex] = {
+            newMessages[newMessages.length - 1] = {
               role: 'assistant',
               content: fullResponse + '▌', // 타이핑 커서
               timestamp: new Date(),
@@ -94,7 +92,7 @@ export default function ChatInterface() {
 
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[tempMessageIndex] = {
+            newMessages[newMessages.length - 1] = {
               role: 'assistant',
               content: fullResponse, // 커서 제거
               timestamp: new Date(),
@@ -111,7 +109,7 @@ export default function ChatInterface() {
 
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[tempMessageIndex] = {
+            newMessages[newMessages.length - 1] = {
               role: 'assistant',
               content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
               timestamp: new Date(),
@@ -128,7 +126,7 @@ export default function ChatInterface() {
 
       setMessages(prev => {
         const newMessages = [...prev];
-        newMessages[tempMessageIndex] = {
+        newMessages[newMessages.length - 1] = {
           role: 'assistant',
           content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
           timestamp: new Date(),
