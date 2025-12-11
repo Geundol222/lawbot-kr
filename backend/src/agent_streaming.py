@@ -93,36 +93,27 @@ class AgentStreaming:
             last_node_output = list(final_state.values())[-1]
             messages = last_node_output.get("messages", [])
 
-            # 2단계: LLM 실제 스트리밍으로 답변 생성
-            print("📝 답변 생성 중 (실시간 스트리밍)...")
+            # 마지막 메시지 확인
+            last_msg = messages[-1]
 
-            for chunk in self.llm.stream(messages):
-                # Gemini의 응답 형식 처리
-                chunk_text = ""
+            # 마지막 메시지가 AI의 답변이면 그것을 스트리밍
+            if hasattr(last_msg, 'content') and isinstance(last_msg.content, str) and last_msg.content:
+                # 이미 생성된 답변을 청크로 나누어 스트리밍
+                answer_text = last_msg.content
+                print(f"📝 답변 생성 완료 ({len(answer_text)}자), 스트리밍 중...")
 
-                if hasattr(chunk, 'content'):
-                    content = chunk.content
-
-                    # 빈 content 체크
-                    if not content:
-                        continue
-
-                    # 리스트 형식 처리
-                    if isinstance(content, list):
-                        for part in content:
-                            if isinstance(part, dict) and 'text' in part:
-                                chunk_text += part['text']
-                    # 문자열 형식 처리
-                    elif isinstance(content, str):
-                        chunk_text = content
-                    else:
-                        chunk_text = str(content)
-
-                    # 실시간 스트리밍
-                    if chunk_text:
-                        print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
-                        full_answer += chunk_text
-                        yield chunk_text
+                # 5자씩 묶어서 스트리밍 (프론트엔드에서 타이핑 효과 처리)
+                chunk_size = 5
+                for i in range(0, len(answer_text), chunk_size):
+                    chunk_text = answer_text[i:i+chunk_size]
+                    full_answer += chunk_text
+                    print(f"📤 Chunk: {chunk_text[:30]}...")
+                    yield chunk_text
+            else:
+                # 답변이 없으면 에러
+                error_msg = "답변을 생성하지 못했습니다."
+                print(f"❌ {error_msg}")
+                yield error_msg
 
         except Exception as e:
             import traceback
