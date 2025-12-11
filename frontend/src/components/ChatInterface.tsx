@@ -21,6 +21,7 @@ export default function ChatInterface() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { updateStats } = useStats();
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // 사용자가 스크롤했는지 감지
   const handleScroll = () => {
@@ -34,10 +35,14 @@ export default function ChatInterface() {
 
   // 메시지 자동 스크롤 (사용자가 아래에 있을 때만)
   useEffect(() => {
-    if (shouldAutoScroll) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!shouldAutoScroll) return;
+
+    if (messagesEndRef.current && messagesContainerRef.current) {
+      // 스트리밍 중에는 부드럽게, 아니면 즉시 스크롤
+      const behavior = isStreaming ? 'auto' : 'smooth';
+      messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
     }
-  }, [messages, shouldAutoScroll]);
+  }, [messages, shouldAutoScroll, isStreaming]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +51,8 @@ export default function ChatInterface() {
     const question = input;
     setInput('');
     setLoading(true);
+    setIsStreaming(true);
+    setShouldAutoScroll(true); // 새 질문 시작 시 자동 스크롤 활성화
 
     const startTime = Date.now();
 
@@ -140,6 +147,7 @@ export default function ChatInterface() {
               return newMessages;
             });
             setLoading(false);
+            setIsStreaming(false);
           };
 
           waitForQueue();
@@ -160,6 +168,7 @@ export default function ChatInterface() {
             return newMessages;
           });
           setLoading(false);
+          setIsStreaming(false);
         }
       );
     } catch (error) {
@@ -177,6 +186,7 @@ export default function ChatInterface() {
         return newMessages;
       });
       setLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -191,7 +201,7 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-5xl lg:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="flex flex-col h-full max-w-5xl lg:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative">
       {/* 메시지 영역 */}
       <div
         ref={messagesContainerRef}
@@ -346,6 +356,22 @@ export default function ChatInterface() {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* 스크롤 아래로 버튼 (사용자가 위로 스크롤했을 때만 표시) */}
+      {!shouldAutoScroll && messages.length > 0 && (
+        <button
+          onClick={() => {
+            setShouldAutoScroll(true);
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }}
+          className="fixed bottom-24 sm:bottom-28 right-6 sm:right-8 z-10 p-3 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg transition-all duration-200 animate-bounce-subtle"
+          aria-label="최신 메시지로 이동"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+        </button>
+      )}
 
       {/* 입력 영역 */}
       <div className="border-t border-gray-200 pt-3 sm:pt-4 pb-4 bg-white/80 backdrop-blur-sm">
