@@ -86,9 +86,10 @@
         - Unit 테스트: 도구, 법령 API, 벡터 검색
         - Integration 테스트: AgenticRAG 전체 흐름
     - GitHub Actions 자동화
-        - CI: PR/Push 시 자동 테스트 (Python 3.10, 3.11)
+        - CI: PR/Push 시 자동 테스트 (Python 3.12)
         - CD: main 브랜치 → HuggingFace + Vercel 자동 배포
     - 코드 품질 검사: flake8, black, isort, mypy
+    - Python 3.12로 고정 (networkx 3.6 호환성 이슈 해결)
 
 6. ✅ **WandB 로깅 전략 개선**
     - 기존: 모든 요청이 하나의 run에 기록 → 분석 어려움
