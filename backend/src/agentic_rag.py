@@ -428,41 +428,38 @@ class AgenticRAG:
                     print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
                     full_answer += chunk_text
                     yield chunk_text
+            else:
+                # 2단계: 최종 답변 생성 (LLM 스트리밍) - 답변이 아직 없는 경우
+                # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
+                print("📝 답변 생성 중 (스트리밍)...")
 
-                # try 블록 종료
-                raise StopIteration
+                for chunk in self.llm_generation.stream(messages):
+                    # Gemini의 응답 형식 처리
+                    chunk_text = ""
 
-            # 2단계: 최종 답변 생성 (LLM 스트리밍) - 위에서 이미 답변이 있으면 여기 도달 안함
-            # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
-            print("📝 답변 생성 중 (스트리밍)...")
+                    if hasattr(chunk, 'content'):
+                        content = chunk.content
 
-            for chunk in self.llm_generation.stream(messages):
-                # Gemini의 응답 형식 처리
-                chunk_text = ""
+                        # 빈 content 체크
+                        if not content:
+                            continue
 
-                if hasattr(chunk, 'content'):
-                    content = chunk.content
+                        # 리스트 형식 처리
+                        if isinstance(content, list):
+                            for part in content:
+                                if isinstance(part, dict) and 'text' in part:
+                                    chunk_text += part['text']
+                        # 문자열 형식 처리
+                        elif isinstance(content, str):
+                            chunk_text = content
+                        else:
+                            chunk_text = str(content)
 
-                    # 빈 content 체크
-                    if not content:
-                        continue
-
-                    # 리스트 형식 처리
-                    if isinstance(content, list):
-                        for part in content:
-                            if isinstance(part, dict) and 'text' in part:
-                                chunk_text += part['text']
-                    # 문자열 형식 처리
-                    elif isinstance(content, str):
-                        chunk_text = content
-                    else:
-                        chunk_text = str(content)
-
-                    # 디버깅 로그
-                    if chunk_text:
-                        print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
-                        full_answer += chunk_text
-                        yield chunk_text
+                        # 디버깅 로그
+                        if chunk_text:
+                            print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
+                            full_answer += chunk_text
+                            yield chunk_text
 
         except Exception as e:
             error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
