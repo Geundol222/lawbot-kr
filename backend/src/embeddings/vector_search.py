@@ -12,6 +12,8 @@ class VectorSearch:
         self.model = SentenceTransformer("intfloat/multilingual-e5-large-instruct")
         # create_client는 (url, key) 순서를 사용
         self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # 마지막 검색 결과를 보관해 후속 로깅/저장에 활용
+        self.last_results = []
 
         # WandB 로거 초기화
         try:
@@ -28,6 +30,8 @@ class VectorSearch:
             threshold: 유사도 임계값 (이 값 이상만 반환)
         """
         search_start = time.time()
+        # 이전 결과 초기화
+        self.last_results = []
 
         # 질문 임베딩
         embedding_start = time.time()
@@ -66,6 +70,7 @@ class VectorSearch:
                         deduplication_count=dedup_count
                     )
 
+                self.last_results = final_results
                 return final_results
 
         except Exception as e:
@@ -137,11 +142,12 @@ class VectorSearch:
                 deduplication_count=dedup_count
             )
 
+        self.last_results = final_results
         return final_results
 
     def _deduplicate_chunks(self, results: list, top_k: int) -> list:
         """
-        청크 중복 제거 (같은 조문의 여러 part 중 가장 높은 유사도만 유지)
+        중복 제거 (조 단위 청킹이므로 중복 없음, 유사도 순으로 정렬만 수행)
 
         Args:
             results: 검색 결과 리스트
@@ -150,22 +156,18 @@ class VectorSearch:
         Returns:
             중복 제거된 결과
         """
+        # 조 단위 청킹이므로 _part suffix가 없음
+        # 동일 조문 중복도 없으므로 유사도 순 정렬만 수행
         seen_articles = {}
 
         for item in results:
             law_name = item.get("law_name")
             article = item.get("article", "")
+            key = f"{law_name}:{article}"
 
-            # 청크 suffix 제거 (예: "제56조_part1" -> "제56조")
-            base_article = article.split("_part")[0]
-            key = f"{law_name}:{base_article}"
-
-            # 같은 조문이 없거나, 더 높은 유사도면 업데이트
+            # 같은 조문이 없거나, 더 높은 유사도면 업데이트 (이론상 중복 없음)
             if key not in seen_articles or item.get("similarity", 0) > seen_articles[key].get("similarity", 0):
-                # article 필드를 base로 정규화
-                normalized_item = item.copy()
-                normalized_item["article"] = base_article
-                seen_articles[key] = normalized_item
+                seen_articles[key] = item
 
         # 유사도 순으로 정렬하여 반환
         deduplicated = list(seen_articles.values())

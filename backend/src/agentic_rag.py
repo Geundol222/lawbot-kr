@@ -85,15 +85,13 @@ def get_full_article_content(law_name: str, article: str, mst: str) -> str:
     if not mst:
         return "MST(법령일련번호) 정보가 없어 조문을 가져올 수 없습니다. search_law_by_api를 사용하세요."
 
-    # 청크 suffix 제거 (예: "제56조_part1" -> "제56조")
-    base_article = article.split("_part")[0]
-
-    jo_formatted = format_jo_number(base_article)
+    # 조 단위 청킹이므로 _part suffix 제거 불필요
+    jo_formatted = format_jo_number(article)
     law_data = get_law_article(mst=mst, jo=jo_formatted)
     content = extract_article_content(law_data)
 
     if content and "오류" not in content:
-        return f"=== {law_name} {base_article} ===\n\n{content}"
+        return f"=== {law_name} {article} ===\n\n{content}"
     else:
         return f"조문 가져오기 실패: {content}"
 
@@ -173,7 +171,10 @@ class AgentState(TypedDict):
 
 class AgenticRAG:
     def __init__(self):
-        self.llm = get_llm()
+        # Tool calling용 LLM (정확한 판단 필요)
+        self.llm_tools = get_llm("tool_calling")
+        # 답변 생성용 LLM (빠른 생성)
+        self.llm_generation = get_llm("generation")
 
         # ⭐ Tools 바인딩 ⭐
         self.tools = [
@@ -181,8 +182,8 @@ class AgenticRAG:
             get_full_article_content,
             search_law_by_api
         ]
-        # 도구는 프롬프트 지시에 따라 선택
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        # Tool calling은 Thinking 모델 사용
+        self.llm_with_tools = self.llm_tools.bind_tools(self.tools)
         self.graph = self._build_graph()
 
         # WandB 로거 초기화
@@ -334,14 +335,25 @@ class AgenticRAG:
     # ========================================
     
     def run(self, question: str, session_id: Optional[str] = None) -> str:
-        """Agent 실행"""
+        """Agent 실행 (non-streaming, backward compatibility)"""
+        # 스트리밍을 내부적으로 실행하고 전체 결과만 반환
+        full_answer = ""
+        for chunk in self.run_stream(question, session_id):
+            full_answer += chunk
+        return full_answer
+
+    def run_stream(self, question: str, session_id: Optional[str] = None):
+        """Agent 실행 (streaming)"""
+        start_time = time.time()
         print(f"\n{'='*60}")
-        print(f"🤖 Agentic RAG 시작")
+        print(f"🤖 Agentic RAG 시작 (스트리밍)")
         print(f"❓ 질문: {question}")
         print(f"{'='*60}\n")
 
         # 세션 아이디 없으면 새로 발급 (대화 기록용)
         session_id = session_id or str(uuid4())
+        # 이전 검색 결과 초기화 (로그 저장용)
+        vector_search_instance.last_results = []
 
         # WandB 세션 시작
         if self.wandb_logger:
@@ -385,42 +397,85 @@ class AgenticRAG:
             "tool_calls": 0,
         }
 
-        # LangGraph 실행
-        result = self.graph.invoke(initial_state)
+        full_answer = ""
+
+        try:
+            # 1단계: Tool calling 완료까지 실행 (non-streaming)
+            final_state = None
+            for event in self.graph.stream(initial_state):
+                final_state = event
+
+            # 마지막 상태에서 메시지 추출
+            if not final_state:
+                yield "오류: 응답을 생성할 수 없습니다."
+                return
+
+            # 가장 마지막 노드의 출력 가져오기
+            last_node_output = list(final_state.values())[-1]
+            messages = last_node_output.get("messages", [])
+
+            # 2단계: 최종 답변 생성 (LLM 스트리밍)
+            # Tool calling 결과를 바탕으로 답변 생성용 LLM에게 전달
+            print("📝 답변 생성 중 (스트리밍)...")
+
+            for chunk in self.llm_generation.stream(messages):
+                # Gemini의 응답 형식 처리
+                chunk_text = ""
+
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+
+                    # 빈 content 체크
+                    if not content:
+                        continue
+
+                    # 리스트 형식 처리
+                    if isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict) and 'text' in part:
+                                chunk_text += part['text']
+                    # 문자열 형식 처리
+                    elif isinstance(content, str):
+                        chunk_text = content
+                    else:
+                        chunk_text = str(content)
+
+                    # 디버깅 로그
+                    if chunk_text:
+                        print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
+                        full_answer += chunk_text
+                        yield chunk_text
+
+        except Exception as e:
+            error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
+            yield error_msg
+            full_answer += error_msg
 
         print(f"\n{'='*60}")
-        print(f"✅ 완료!")
+        print(f"✅ 완료! (총 {len(full_answer)}자)")
         print(f"{'='*60}\n")
-
-        # 마지막 AI 메시지 반환
-        final_message = result['messages'][-1]
-
-        answer = ""
-        if hasattr(final_message, 'content'):
-            content = final_message.content
-            # content가 리스트인 경우 (Gemini 응답 형식)
-            if isinstance(content, list):
-                text_parts = [part.get('text', '') for part in content if isinstance(part, dict) and 'text' in part]
-                answer = '\n'.join(text_parts)
-            else:
-                answer = str(content)
-        else:
-            answer = str(final_message)
 
         # WandB 세션 종료 및 로깅
         if self.wandb_logger:
-            # 토큰 수 추정 (Gemini API에서 토큰 정보 제공하지 않으면 대략적으로 계산)
-            total_tokens = len(question.split()) + len(answer.split())
-            self.wandb_logger.end_session(answer, total_tokens)
+            total_tokens = len(question.split()) + len(full_answer.split())
+            self.wandb_logger.end_session(full_answer, total_tokens)
 
-        # Supabase 대화 로그 저장 (실패해도 에이전트 동작은 계속)
+        # Supabase 대화 로그 저장
         try:
+            law_name = None
+            article = None
+            if vector_search_instance.last_results:
+                top = vector_search_instance.last_results[0]
+                law_name = top.get("law_name")
+                article = top.get("article")
+
             save_conversation(
                 session_id=session_id,
                 user_question=question,
-                bot_answer=answer,
+                bot_answer=full_answer,
+                law_name=law_name,
+                article=article,
+                response_time_ms=int((time.time() - start_time) * 1000)
             )
         except Exception as e:
             print(f"⚠️ Supabase 대화 저장 실패: {e}")
-
-        return answer

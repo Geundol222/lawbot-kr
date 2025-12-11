@@ -14,7 +14,9 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # Supabase (필수 환경변수)
 SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY')
+# 서버 사이드 쓰기 권한을 위해 서비스 롤 키가 있으면 우선 사용하고, 없으면 anon 키로 폴백
+SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or os.getenv('SUPABASE_ANON_KEY')
 
 # 필수 환경변수 검증
 def validate_required_env_vars():
@@ -59,18 +61,41 @@ LAW_KEY = {
     '일상-법령': 'dlytrmRlt'
 }
 
-# LLM은 함수로 감싸기 (필요할 때만 초기화)
-_llm_instance = None
+# LLM 인스턴스 캐시 (싱글톤 패턴)
+_llm_instances = {}
 
-def get_llm():
-    """LLM 인스턴스 가져오기 (싱글톤 패턴)"""
-    global _llm_instance
-    
-    if _llm_instance is None:
+def get_llm(use_case: str = "generation"):
+    """
+    용도별 LLM 인스턴스 가져오기 (싱글톤 패턴)
+
+    Args:
+        use_case:
+            - "generation": 답변 생성 (Gemini 2.5 Flash - 빠르고 저렴)
+            - "tool_calling": Function calling, 복잡한 추론 (Gemini 2.0 Flash Thinking - 정확)
+            - "judge_exception": 예외 조항 탐지 (Gemini 2.5 Flash Lite - 초고속/초저가)
+    """
+    global _llm_instances
+
+    if use_case not in _llm_instances:
         from langchain_google_genai import ChatGoogleGenerativeAI
-        _llm_instance = ChatGoogleGenerativeAI(
-            model='gemini-2.5-flash',
-            temperature=0.0
-        )
-    
-    return _llm_instance
+
+        if use_case == "tool_calling":
+            # Function calling과 복잡한 추론은 Thinking 모델
+            _llm_instances[use_case] = ChatGoogleGenerativeAI(
+                model='gemini-3-pro-preview',
+                temperature=0.0
+            )
+        elif use_case == "generation":
+            # 답변 생성은 빠른 Flash
+            _llm_instances[use_case] = ChatGoogleGenerativeAI(
+                model='gemini-2.5-flash',
+                temperature=0.0
+            )
+        elif use_case == "judge_exception":
+            # 예외 조항, 적용 범위 탐지는 초경량 Flash Lite
+            _llm_instances[use_case] = ChatGoogleGenerativeAI(
+                model='gemini-2.5-flash-lite',
+                temperature=0.0
+            )
+
+    return _llm_instances[use_case]
