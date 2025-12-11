@@ -66,6 +66,33 @@ export default function ChatInterface() {
 
     let fullResponse = '';
     let isFirstChunk = true;
+    let displayQueue: string[] = [];
+    let isDisplaying = false;
+
+    // 큐에서 한글자씩 천천히 표시하는 함수
+    const displayCharacters = () => {
+      if (displayQueue.length === 0) {
+        isDisplaying = false;
+        return;
+      }
+
+      isDisplaying = true;
+      const char = displayQueue.shift()!;
+      fullResponse += char;
+
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = {
+          role: 'assistant',
+          content: fullResponse + '▌',
+          timestamp: new Date(),
+        };
+        return newMessages;
+      });
+
+      // 20ms 후 다음 글자 표시
+      setTimeout(displayCharacters, 20);
+    };
 
     try {
       await chatStreamAPI(
@@ -73,42 +100,49 @@ export default function ChatInterface() {
           question,
           session_id: sessionId,
         },
-        // onChunk: 청크가 올 때마다 업데이트
+        // onChunk: 청크가 올 때마다 큐에 추가
         (chunk: string) => {
-          fullResponse += chunk;
+          // 첫 청크면 로딩 메시지 제거
+          if (isFirstChunk) {
+            isFirstChunk = false;
+          }
 
-          setMessages(prev => {
-            const newMessages = [...prev];
+          // 청크의 각 글자를 큐에 추가
+          for (const char of chunk) {
+            displayQueue.push(char);
+          }
 
-            // 첫 청크면 로딩 메시지를 실제 답변으로 교체
-            if (isFirstChunk) {
-              isFirstChunk = false;
+          // 표시 중이 아니면 시작
+          if (!isDisplaying) {
+            displayCharacters();
+          }
+        },
+        // onDone: 완료되면 큐가 비워질 때까지 기다린 후 커서 제거
+        () => {
+          // 큐가 비워질 때까지 대기
+          const waitForQueue = () => {
+            if (displayQueue.length > 0 || isDisplaying) {
+              setTimeout(waitForQueue, 100);
+              return;
             }
 
-            // 마지막 메시지(어시스턴트 응답) 업데이트
-            newMessages[newMessages.length - 1] = {
-              role: 'assistant',
-              content: fullResponse + '▌', // 타이핑 커서
-              timestamp: new Date(),
-            };
-            return newMessages;
-          });
-        },
-        // onDone: 완료되면 커서 제거
-        () => {
-          const responseTime = (Date.now() - startTime) / 1000;
-          updateStats(responseTime, true);
+            // 큐가 비워졌으면 커서 제거
+            const responseTime = (Date.now() - startTime) / 1000;
+            updateStats(responseTime, true);
 
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1] = {
-              role: 'assistant',
-              content: fullResponse, // 커서 제거
-              timestamp: new Date(),
-            };
-            return newMessages;
-          });
-          setLoading(false);
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                role: 'assistant',
+                content: fullResponse, // 커서 제거
+                timestamp: new Date(),
+              };
+              return newMessages;
+            });
+            setLoading(false);
+          };
+
+          waitForQueue();
         },
         // onError: 에러 처리
         (error: string) => {
