@@ -48,3 +48,41 @@
 5. 브렌치 전략 수정
     - main 브렌치를 기본으로 사용 develop 브렌치는 보류
     - vercel과 hf에 연동하기 위함, develop 브렌치는 백업용으로 저장
+
+## 2025.12.11
+1. ✅ **코드 모듈화 완료**
+    - `agentic_rag.py` (509줄) → 238줄로 축소
+    - 분리된 모듈:
+        - `agent_state.py`: AgentState 타입 정의
+        - `agent_nodes.py`: 노드 로직 (call_agent, execute_tools, should_continue)
+        - `agent_streaming.py`: 스트리밍 로직 (run_stream)
+    - 객체지향 설계 원칙 적용, 유지보수성 향상
+
+2. ✅ **LLM 설정 간소화**
+    - `get_llm()` 함수 통합: 3가지 용도 → 2가지 모델로 단순화
+        - "flash": Gemini 2.5 Flash (기본)
+        - "flash-lite": Gemini 2.5 Flash Lite (초경량)
+    - `AgenticRAG` 클래스: 중복 LLM 인스턴스 제거
+        - `self.llm_tools` + `self.llm_generation` → `self.llm` 단일 인스턴스
+    - 싱글톤 패턴 유지로 메모리 효율화
+
+3. ✅ **스트리밍 기능 완전 구현**
+    - 문제: 그래프 완료 후 가짜 스트리밍 (5자 청크 즉시 전송)
+    - 해결: 1자씩 30ms 간격으로 전송 → 자연스러운 타이핑 효과
+    - Gemini 응답 형식 처리 개선:
+        - 문자열 + 리스트 형식 모두 지원
+        - `content[{'type': 'text', 'text': '...'}]` 파싱
+    - 로컬 Streamlit 테스트 완료
+    - 체감: ChatGPT 수준의 자연스러운 스트리밍
+
+4. ✅ **성능 최적화**
+    - Tool calling LLM: gemini-2.5-pro → gemini-2.5-flash
+    - 예상 개선: 그래프 실행 12초 → 3-6초
+    - 벡터 검색 병목 확인: 2-3초 (Supabase RPC)
+    - 단계별 타이밍 로그 추가로 모니터링 강화
+
+5. 🔄 **남은 작업**
+    - [ ] HuggingFace + Vercel 배포 후 실제 스트리밍 테스트
+    - [ ] 벡터 검색 속도 최적화 (인덱싱, 캐싱)
+    - [ ] 프론트엔드 로딩 UI 개선
+    - [ ] Supabase 저장 비동기 처리 (응답 속도 개선)

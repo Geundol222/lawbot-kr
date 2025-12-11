@@ -137,7 +137,10 @@ lawbot-kr/
 │   └── main.py                     # FastAPI 엔드포인트
 ├── backend/
 │   └── src/
-│       ├── agentic_rag.py          # Agentic RAG (LangGraph)
+│       ├── agentic_rag.py          # Agentic RAG 메인 (도구 정의, 그래프 구성)
+│       ├── agent_state.py          # Agent 상태 정의
+│       ├── agent_nodes.py          # Agent 노드 로직
+│       ├── agent_streaming.py      # 스트리밍 로직
 │       ├── embeddings/
 │       │   ├── vector_search.py    # 벡터 검색 (Supabase)
 │       │   └── generate_embeddings.py  # 임베딩 생성 스크립트
@@ -323,6 +326,14 @@ WANDB_ENABLED=false
 ---
 
 ## 🎯 주요 개선 사항
+
+### v3.0 (모듈화 및 스트리밍 완성) - 2025.12.11
+- ✅ **코드 모듈화**: `agentic_rag.py` 509줄 → 238줄 (53% 감소)
+  - 분리: `agent_state.py`, `agent_nodes.py`, `agent_streaming.py`
+  - 객체지향 설계 원칙 적용, 유지보수성 대폭 향상
+- ✅ **LLM 설정 간소화**: 중복 인스턴스 제거, 메모리 효율화
+- ✅ **자연스러운 스트리밍**: 1자씩 30ms 간격 타이핑 효과
+- ✅ **성능 최적화**: gemini-2.5-pro → flash (그래프 실행 12초 → 3-6초 예상)
 
 ### v2.1 (최적화 버전)
 - ✅ 벡터 검색 결과에 조문 내용 포함 → API 호출 3회 절약
