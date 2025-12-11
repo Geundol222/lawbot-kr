@@ -161,7 +161,15 @@ def search_law_by_api(law_name: str, article_number: str = None) -> str:
 # ========================================
 
 class AgenticRAG:
-    def __init__(self):
+    def __init__(self, session_id: Optional[str] = None):
+        """
+        AgenticRAG 초기화
+
+        Args:
+            session_id: 세션 ID (프론트엔드에서 전달, WandB 로깅용)
+        """
+        self.session_id = session_id
+
         # 단일 LLM 사용 (Gemini 2.5 Flash)
         self.llm = get_llm("flash")
 
@@ -173,10 +181,11 @@ class AgenticRAG:
         ]
         self.llm_with_tools = self.llm.bind_tools(self.tools)
 
-        # WandB 로거 초기화
+        # WandB 로거 초기화 (세션별)
         try:
-            self.wandb_logger = AgenticRAGLogger(get_wandb_logger())
-        except Exception:
+            self.wandb_logger = AgenticRAGLogger(get_wandb_logger(session_id))
+        except Exception as e:
+            print(f"⚠️ WandB 로거 초기화 실패: {e}")
             self.wandb_logger = None
 
         # 노드 로직

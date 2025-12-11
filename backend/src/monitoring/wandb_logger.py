@@ -12,18 +12,19 @@ import os
 
 
 class WandbLogger:
-    """WandB 로깅 통합 관리 클래스"""
+    """WandB 로깅 통합 관리 클래스 (세션별 Run 전략)"""
 
-    def __init__(self, project_name: str = "lawbot-kr", enabled: bool = None, run_name: str = None, tags: List[str] = None, group: str = None):
+    def __init__(self, project_name: str = "lawbot-kr", enabled: bool = None, run_name: str = None, tags: List[str] = None, group: str = None, session_id: str = None):
         """
         WandB 로거 초기화
 
         Args:
             project_name: WandB 프로젝트 이름
             enabled: 로깅 활성화 여부 (None이면 환경변수 WANDB_ENABLED로 결정)
-            run_name: Run 이름 (None이면 자동 생성)
+            run_name: Run 이름 (None이면 session_id 기반 자동 생성)
             tags: 태그 리스트 (버전, 실험명 등)
-            group: 그룹 이름 (같은 실험의 여러 run을 그룹화)
+            group: 그룹 이름 (None이면 날짜별 자동 그룹화)
+            session_id: 세션 ID (프론트엔드에서 전달)
         """
         # 환경변수로 로깅 활성화/비활성화 제어
         if enabled is None:
@@ -35,6 +36,8 @@ class WandbLogger:
         self.run_name = run_name
         self.tags = tags or []
         self.group = group
+        self.session_id = session_id
+        self.conversation_step = 0  # 세션 내 대화 턴 카운터
 
         # 임시 메트릭 저장소 (배치 로깅용)
         self._metrics_buffer = {}
@@ -43,82 +46,91 @@ class WandbLogger:
             self._init_wandb()
 
     def _init_wandb(self):
-        """WandB 초기화"""
+        """WandB 초기화 (세션별 Run)"""
         try:
-            # 이미 run이 있으면 재사용
-            if wandb.run is None:
-                # 환경변수에서 버전 정보 가져오기
-                version = os.getenv("LAWBOT_VERSION", "dev")
-                experiment_name = os.getenv("WANDB_EXPERIMENT", "baseline")
+            # 환경변수에서 버전 정보 가져오기
+            version = os.getenv("LAWBOT_VERSION", "v2.0")
+            experiment_name = os.getenv("WANDB_EXPERIMENT", "production")
 
-                # 태그에 버전 추가
-                tags = self.tags.copy()
-                if version:
-                    tags.append(f"v{version}")
-                if experiment_name and experiment_name != "baseline":
-                    tags.append(experiment_name)
+            # 태그에 버전 추가
+            tags = self.tags.copy()
+            tags.append(version)
+            if experiment_name:
+                tags.append(experiment_name)
 
-                # 그룹 설정 (환경변수 우선)
-                group = self.group or os.getenv("WANDB_GROUP", experiment_name)
+            # 날짜별 Group (daily_20251211)
+            today = datetime.now().strftime('%Y%m%d')
+            group = self.group or os.getenv("WANDB_GROUP", f"daily_{today}")
 
-                # Run 이름 설정 (환경변수 우선)
-                run_name = self.run_name or os.getenv("WANDB_RUN_NAME")
-                if not run_name:
-                    run_name = f"{experiment_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            # Run 이름: 세션 ID 기반 (session_abc123_143022)
+            run_name = self.run_name
+            if not run_name:
+                if self.session_id:
+                    # 세션 ID에서 timestamp 추출 (session-1702345678 형식)
+                    timestamp = datetime.now().strftime('%H%M%S')
+                    run_name = f"{self.session_id}_{timestamp}"
+                else:
+                    run_name = f"session_unknown_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-                self.run = wandb.init(
-                    project=self.project_name,
-                    name=run_name,
-                    tags=tags,
-                    group=group,
-                    config={
-                        "model": "gemini-2.5-flash",
-                        "embedding_model": "intfloat/multilingual-e5-large-instruct",
-                        "vector_db": "supabase",
-                        "chunk_size": 500,
-                        "chunk_overlap": 100,
-                        "version": version,
-                        "experiment": experiment_name
-                    },
-                    # resume 설정으로 같은 run 이어가기 (선택사항)
-                    resume=os.getenv("WANDB_RESUME", "never")  # "allow", "must", "never"
-                )
-            else:
-                self.run = wandb.run
+            self.run = wandb.init(
+                project=self.project_name,
+                name=run_name,
+                tags=tags,
+                group=group,
+                config={
+                    "model": "gemini-2.5-flash",
+                    "embedding_model": "intfloat/multilingual-e5-large-instruct",
+                    "vector_db": "supabase",
+                    "chunking": "article-based",
+                    "version": version,
+                    "experiment": experiment_name,
+                    "session_id": self.session_id
+                },
+                # 세션별 run이므로 resume 사용 안 함
+                resume="never"
+            )
 
             print(f"✅ WandB 초기화 완료: {self.project_name}")
             print(f"   Run: {self.run.name}")
             print(f"   Group: {self.run.group}")
             print(f"   Tags: {self.run.tags}")
+            print(f"   Session: {self.session_id}")
         except Exception as e:
             print(f"⚠️ WandB 초기화 실패: {e}")
             self.enabled = False
 
     def log_metric(self, key: str, value: Any, step: Optional[int] = None):
-        """단일 메트릭 로깅"""
+        """단일 메트릭 로깅 (step 자동 증가)"""
         if not self.enabled:
             return
 
         try:
-            if step is not None:
-                wandb.log({key: value}, step=step)
-            else:
-                wandb.log({key: value})
+            # step이 없으면 conversation_step 사용
+            if step is None:
+                step = self.conversation_step
+
+            wandb.log({key: value}, step=step)
         except Exception as e:
             print(f"⚠️ 메트릭 로깅 실패 ({key}): {e}")
 
     def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None):
-        """여러 메트릭 한번에 로깅"""
+        """여러 메트릭 한번에 로깅 (step 자동 증가)"""
         if not self.enabled:
             return
 
         try:
-            if step is not None:
-                wandb.log(metrics, step=step)
-            else:
-                wandb.log(metrics)
+            # step이 없으면 conversation_step 사용
+            if step is None:
+                step = self.conversation_step
+
+            wandb.log(metrics, step=step)
         except Exception as e:
             print(f"⚠️ 메트릭 배치 로깅 실패: {e}")
+
+    def increment_step(self):
+        """대화 턴 증가 (새 질문마다 호출)"""
+        self.conversation_step += 1
+        return self.conversation_step
 
     def log_table(self, table_name: str, columns: List[str], data: List[List[Any]]):
         """테이블 로깅"""
@@ -157,12 +169,17 @@ class AgenticRAGLogger:
         self.conversation_log = []
 
     def start_session(self, question: str):
-        """세션 시작"""
+        """세션 시작 (대화 턴 증가)"""
         self.session_start = time.time()
         self.tool_calls_log = []
+
+        # 대화 턴 증가
+        self.logger.increment_step()
+
         return {
             "question": question,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "step": self.logger.conversation_step
         }
 
     def log_tool_call(self, tool_name: str, args: Dict, result_preview: str, execution_time: float, success: bool = True):
@@ -404,16 +421,45 @@ class FastAPILogger:
 
 
 # ========================================
-# 싱글톤 인스턴스 (전역에서 사용)
+# 세션별 인스턴스 관리 (싱글톤 대신 세션 기반)
 # ========================================
 
-_wandb_logger_instance = None
+_wandb_logger_instances = {}  # session_id -> WandbLogger 매핑
 
-def get_wandb_logger() -> WandbLogger:
-    """WandB 로거 싱글톤 인스턴스 가져오기"""
-    global _wandb_logger_instance
+def get_wandb_logger(session_id: str = None) -> WandbLogger:
+    """
+    WandB 로거 인스턴스 가져오기 (세션별)
 
-    if _wandb_logger_instance is None:
-        _wandb_logger_instance = WandbLogger()
+    Args:
+        session_id: 세션 ID (없으면 전역 인스턴스 사용)
 
-    return _wandb_logger_instance
+    Returns:
+        WandbLogger 인스턴스
+    """
+    global _wandb_logger_instances
+
+    # 세션 ID 없으면 기본 인스턴스 사용 (하위 호환성)
+    if session_id is None:
+        session_id = "default"
+
+    # 세션별 인스턴스가 없으면 생성
+    if session_id not in _wandb_logger_instances:
+        _wandb_logger_instances[session_id] = WandbLogger(session_id=session_id)
+
+    return _wandb_logger_instances[session_id]
+
+
+def cleanup_wandb_logger(session_id: str):
+    """
+    세션 종료 시 WandB run 정리
+
+    Args:
+        session_id: 종료할 세션 ID
+    """
+    global _wandb_logger_instances
+
+    if session_id in _wandb_logger_instances:
+        logger = _wandb_logger_instances[session_id]
+        logger.finish()
+        del _wandb_logger_instances[session_id]
+        print(f"✅ WandB 세션 종료: {session_id}")
