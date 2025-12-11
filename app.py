@@ -5,6 +5,10 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+# Python 출력 버퍼링 비활성화 (로그 즉시 출력)
+import os
+os.environ['PYTHONUNBUFFERED'] = '1'
+
 # backend 경로 추가
 backend_path = Path(__file__).parent / 'backend'
 sys.path.insert(0, str(backend_path))

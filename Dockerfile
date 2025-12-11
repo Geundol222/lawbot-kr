@@ -29,5 +29,8 @@ COPY api/ ./api/
 # 포트 노출 (Hugging Face는 7860 사용)
 EXPOSE 7860
 
+# Python 출력 버퍼링 비활성화 (로그 즉시 출력)
+ENV PYTHONUNBUFFERED=1
+
 # FastAPI 실행 (Uvicorn)
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860", "--log-level", "info"]
