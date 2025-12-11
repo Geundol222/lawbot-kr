@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { chatStreamAPI } from '@/lib/api';
 import { useStats } from '@/contexts/StatsContext';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -258,8 +260,14 @@ export default function ChatInterface() {
                         </span>
                       )}
                     </div>
-                    <div className="whitespace-pre-wrap leading-relaxed text-gray-900 text-sm sm:text-base">
-                      {msg.content}
+                    <div className="prose prose-sm sm:prose max-w-none leading-relaxed text-gray-900">
+                      {msg.role === 'assistant' ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      ) : (
+                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                      )}
                     </div>
                   </div>
                 </div>
