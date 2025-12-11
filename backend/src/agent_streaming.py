@@ -74,49 +74,40 @@ class AgentStreaming:
         }
 
         try:
-            # LangGraph astream_events를 사용해서 LLM 토큰 레벨 스트리밍
+            # LangGraph stream with messages mode (토큰 단위 스트리밍)
             graph_start = time.time()
             print("⏱️  그래프 실행 시작 (실시간 스트리밍 모드)...")
 
-            async for event in self.graph.astream_events(initial_state, version="v2"):
-                event_type = event.get("event")
-                event_name = event.get("name", "")
+            async for msg, metadata in self.graph.astream(
+                initial_state,
+                stream_mode="messages"
+            ):
+                # 메시지 내용이 있는지 확인
+                if hasattr(msg, 'content') and msg.content:
+                    content = msg.content
 
-                # 디버깅: 모든 이벤트 로그
-                print(f"🔍 Event: {event_type} | Name: {event_name}")
-
-                # on_chat_model_stream: LLM이 토큰을 생성할 때마다 발생
-                if event_type == "on_chat_model_stream":
+                    # 첫 토큰이면 tool calling 완료 로그
                     if not is_streaming:
                         graph_time = time.time() - graph_start
                         print(f"⏱️  Tool calling 완료: {graph_time:.2f}초")
                         print("📝 답변 생성 중 (실시간 스트리밍)...")
                         is_streaming = True
 
-                    # 청크 데이터 추출
-                    chunk = event.get("data", {}).get("chunk", None)
-                    if chunk and hasattr(chunk, 'content'):
-                        content = chunk.content
+                    # 텍스트 추출
+                    chunk_text = ""
+                    if isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict) and 'text' in part:
+                                chunk_text += part['text']
+                    elif isinstance(content, str):
+                        chunk_text = content
+                    else:
+                        chunk_text = str(content)
 
-                        # 빈 content 건너뛰기
-                        if not content:
-                            continue
-
-                        # 텍스트 추출
-                        chunk_text = ""
-                        if isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict) and 'text' in part:
-                                    chunk_text += part['text']
-                        elif isinstance(content, str):
-                            chunk_text = content
-                        else:
-                            chunk_text = str(content)
-
-                        if chunk_text:
-                            print(f"📤 Token: {chunk_text[:30]}...")
-                            full_answer += chunk_text
-                            yield chunk_text
+                    if chunk_text:
+                        print(f"📤 Token: {chunk_text[:30]}...")
+                        full_answer += chunk_text
+                        yield chunk_text
 
         except Exception as e:
             error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
