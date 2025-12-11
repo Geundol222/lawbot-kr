@@ -30,10 +30,9 @@ class AgentStreaming:
         self.llm = llm
         self.wandb_logger = wandb_logger
 
-    async def _run_stream_async(self, question: str, session_id: str, start_time: float):
-        """내부 async 스트리밍 로직"""
+    def _run_stream_sync(self, question: str, session_id: str, start_time: float):
+        """동기 스트리밍 로직 (간단하고 안정적)"""
         full_answer = ""
-        is_streaming = False
 
         # 초기 메시지
         initial_messages = [
@@ -74,38 +73,54 @@ class AgentStreaming:
         }
 
         try:
-            # LangGraph stream with messages mode (토큰 단위 스트리밍)
+            # 1단계: Tool calling 완료까지 실행 (non-streaming)
             graph_start = time.time()
-            print("⏱️  그래프 실행 시작 (실시간 스트리밍 모드)...")
+            print("⏱️  그래프 실행 시작...")
 
-            async for msg, metadata in self.graph.astream(
-                initial_state,
-                stream_mode="messages"
-            ):
-                # 메시지 내용이 있는지 확인
-                if hasattr(msg, 'content') and msg.content:
-                    content = msg.content
+            final_state = None
+            for event in self.graph.stream(initial_state):
+                final_state = event
 
-                    # 첫 토큰이면 tool calling 완료 로그
-                    if not is_streaming:
-                        graph_time = time.time() - graph_start
-                        print(f"⏱️  Tool calling 완료: {graph_time:.2f}초")
-                        print("📝 답변 생성 중 (실시간 스트리밍)...")
-                        is_streaming = True
+            graph_time = time.time() - graph_start
+            print(f"⏱️  그래프 실행 완료: {graph_time:.2f}초")
 
-                    # 텍스트 추출
-                    chunk_text = ""
+            # 마지막 상태에서 메시지 추출
+            if not final_state:
+                yield "오류: 응답을 생성할 수 없습니다."
+                return
+
+            # 가장 마지막 노드의 출력 가져오기
+            last_node_output = list(final_state.values())[-1]
+            messages = last_node_output.get("messages", [])
+
+            # 2단계: LLM 실제 스트리밍으로 답변 생성
+            print("📝 답변 생성 중 (실시간 스트리밍)...")
+
+            for chunk in self.llm.stream(messages):
+                # Gemini의 응답 형식 처리
+                chunk_text = ""
+
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+
+                    # 빈 content 체크
+                    if not content:
+                        continue
+
+                    # 리스트 형식 처리
                     if isinstance(content, list):
                         for part in content:
                             if isinstance(part, dict) and 'text' in part:
                                 chunk_text += part['text']
+                    # 문자열 형식 처리
                     elif isinstance(content, str):
                         chunk_text = content
                     else:
                         chunk_text = str(content)
 
+                    # 실시간 스트리밍
                     if chunk_text:
-                        print(f"📤 Token: {chunk_text[:30]}...")
+                        print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
                         full_answer += chunk_text
                         yield chunk_text
 
@@ -148,7 +163,7 @@ class AgentStreaming:
             print(f"⚠️ Supabase 대화 저장 실패: {e}")
 
     def run_stream(self, question: str, session_id: Optional[str] = None):
-        """Agent 실행 (streaming) - sync wrapper using asyncio.run"""
+        """Agent 실행 (streaming)"""
         start_time = time.time()
         print(f"\n{'='*60}")
         print(f"🤖 Agentic RAG 시작 (실시간 스트리밍)")
@@ -164,31 +179,6 @@ class AgentStreaming:
         if self.wandb_logger:
             self.wandb_logger.start_session(question)
 
-        # async 제너레이터를 sync로 변환 - 더 안정적인 방법
-        import nest_asyncio
-        try:
-            nest_asyncio.apply()
-        except:
-            pass
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        async def collect_chunks():
-            chunks = []
-            try:
-                async for chunk in self._run_stream_async(question, session_id, start_time):
-                    chunks.append(chunk)
-            except Exception as e:
-                import traceback
-                print(f"❌ Async 오류: {e}")
-                traceback.print_exc()
-                chunks.append(f"\n\n❌ 오류: {str(e)}\n")
-            return chunks
-
-        try:
-            chunks = loop.run_until_complete(collect_chunks())
-            for chunk in chunks:
-                yield chunk
-        finally:
-            loop.close()
+        # 동기 스트리밍 실행
+        for chunk in self._run_stream_sync(question, session_id, start_time):
+            yield chunk
