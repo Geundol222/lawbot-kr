@@ -49,7 +49,7 @@ export default function ChatInterface() {
 
     const startTime = Date.now();
 
-    // 사용자 메시지 + 빈 어시스턴트 메시지를 한번에 추가
+    // 사용자 메시지 + 로딩 메시지 추가
     setMessages(prev => [
       ...prev,
       {
@@ -59,12 +59,13 @@ export default function ChatInterface() {
       },
       {
         role: 'assistant',
-        content: '',
+        content: '📚 해당 질문에 대해 적절한 법령을 찾아보겠습니다...',
         timestamp: new Date(),
       },
     ]);
 
     let fullResponse = '';
+    let isFirstChunk = true;
 
     try {
       await chatStreamAPI(
@@ -72,11 +73,19 @@ export default function ChatInterface() {
           question,
           session_id: sessionId,
         },
-        // onChunk: 청크가 올 때마다 마지막 메시지 업데이트
+        // onChunk: 청크가 올 때마다 업데이트
         (chunk: string) => {
           fullResponse += chunk;
+
           setMessages(prev => {
             const newMessages = [...prev];
+
+            // 첫 청크면 로딩 메시지를 실제 답변으로 교체
+            if (isFirstChunk) {
+              isFirstChunk = false;
+            }
+
+            // 마지막 메시지(어시스턴트 응답) 업데이트
             newMessages[newMessages.length - 1] = {
               role: 'assistant',
               content: fullResponse + '▌', // 타이핑 커서
