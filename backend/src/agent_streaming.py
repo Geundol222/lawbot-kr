@@ -80,6 +80,10 @@ class AgentStreaming:
 
             async for event in self.graph.astream_events(initial_state, version="v2"):
                 event_type = event.get("event")
+                event_name = event.get("name", "")
+
+                # 디버깅: 모든 이벤트 로그
+                print(f"🔍 Event: {event_type} | Name: {event_name}")
 
                 # on_chat_model_stream: LLM이 토큰을 생성할 때마다 발생
                 if event_type == "on_chat_model_stream":
