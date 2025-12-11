@@ -15,6 +15,14 @@ jobs:
         python-version: ['3.12']
 
     steps:
+    - name: Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        df -h
+
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -27,8 +35,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-mock pytest-asyncio
+        pip install -r requirements.txt --no-cache-dir
+        pip install pytest pytest-cov pytest-mock pytest-asyncio --no-cache-dir
 
     - name: Create .env.test file
       run: |
