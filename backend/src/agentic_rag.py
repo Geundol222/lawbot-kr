@@ -420,21 +420,29 @@ class AgenticRAG:
 
             for chunk in self.llm_generation.stream(messages):
                 # Gemini의 응답 형식 처리
+                chunk_text = ""
+
                 if hasattr(chunk, 'content'):
                     content = chunk.content
 
+                    # 빈 content 체크
+                    if not content:
+                        continue
+
                     # 리스트 형식 처리
                     if isinstance(content, list):
-                        text_parts = [
-                            part.get('text', '')
-                            for part in content
-                            if isinstance(part, dict) and 'text' in part
-                        ]
-                        chunk_text = ''.join(text_parts)
+                        for part in content:
+                            if isinstance(part, dict) and 'text' in part:
+                                chunk_text += part['text']
+                    # 문자열 형식 처리
+                    elif isinstance(content, str):
+                        chunk_text = content
                     else:
                         chunk_text = str(content)
 
+                    # 디버깅 로그
                     if chunk_text:
+                        print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
                         full_answer += chunk_text
                         yield chunk_text
 
