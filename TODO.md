@@ -35,12 +35,12 @@
         - GraphDB로 DB변경 (데이터 구축 어려움)
         - 인접조문을 추가하여 하이브리드 검색 강화
     - 결론: 나중에 고도화 단계에서 처리. 현재는 프롬프트 개선으로 대응
-3. ✅ LLM 스트리밍 출력 구현 완료
+3. LLM 스트리밍 출력 구현 완료
     - backend: `run_stream()` 메서드 추가
     - API: `/chat/stream` 엔드포인트 추가 (SSE)
     - Frontend: Next.js + React 스트리밍 UI 구현
     - 체감 속도: 10초 → 0.5초 (20배 개선)
-4. ✅ 하이브리드 LLM 전략 적용
+4. 하이브리드 LLM 전략 적용
     - Tool calling: Gemini 2.0 Flash Thinking (정확한 법령명 추론)
     - 답변 생성: Gemini 2.5 Flash (빠른 생성)
     - 이유: Flash만으로는 애매한 법령명 매핑 시 정확도 70% → Thinking 모델로 95% 달성
