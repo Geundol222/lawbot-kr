@@ -96,24 +96,54 @@ class AgentStreaming:
             # 마지막 메시지 확인
             last_msg = messages[-1]
 
-            # 마지막 메시지가 AI의 답변이면 그것을 스트리밍
-            if hasattr(last_msg, 'content') and isinstance(last_msg.content, str) and last_msg.content:
-                # 이미 생성된 답변을 청크로 나누어 스트리밍
-                answer_text = last_msg.content
+            # 답변 텍스트 추출 (문자열 또는 리스트 형식 모두 처리)
+            answer_text = None
+            if hasattr(last_msg, 'content') and last_msg.content:
+                content = last_msg.content
+
+                # 문자열인 경우
+                if isinstance(content, str):
+                    answer_text = content
+                # 리스트 형식인 경우 (Gemini 응답)
+                elif isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and 'text' in part:
+                            answer_text = part['text']
+                            break
+
+            # 답변이 있으면 스트리밍
+            if answer_text:
                 print(f"📝 답변 생성 완료 ({len(answer_text)}자), 스트리밍 중...")
 
-                # 5자씩 묶어서 스트리밍 (프론트엔드에서 타이핑 효과 처리)
-                chunk_size = 5
-                for i in range(0, len(answer_text), chunk_size):
-                    chunk_text = answer_text[i:i+chunk_size]
-                    full_answer += chunk_text
-                    print(f"📤 Chunk: {chunk_text[:30]}...")
-                    yield chunk_text
+                # 1자씩 스트리밍 (자연스러운 타이핑 효과)
+                for char in answer_text:
+                    full_answer += char
+                    yield char
+                    # 약간의 딜레이로 자연스러운 속도 조절 (30ms)
+                    time.sleep(0.03)
             else:
-                # 답변이 없으면 에러
-                error_msg = "답변을 생성하지 못했습니다."
-                print(f"❌ {error_msg}")
-                yield error_msg
+                # 답변이 없으면 LLM에게 직접 물어보기
+                print(f"⚠️  답변 텍스트를 찾을 수 없음, LLM에게 답변 요청...")
+
+                for chunk in self.llm.stream(messages):
+                    chunk_text = ""
+                    if hasattr(chunk, 'content'):
+                        content = chunk.content
+                        if not content:
+                            continue
+
+                        if isinstance(content, list):
+                            for part in content:
+                                if isinstance(part, dict) and 'text' in part:
+                                    chunk_text += part['text']
+                        elif isinstance(content, str):
+                            chunk_text = content
+                        else:
+                            chunk_text = str(content)
+
+                        if chunk_text:
+                            full_answer += chunk_text
+                            yield chunk_text
 
         except Exception as e:
             import traceback
