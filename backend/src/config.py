@@ -82,7 +82,7 @@ def get_llm(use_case: str = "generation"):
         if use_case == "tool_calling":
             # Function calling과 복잡한 추론은 Thinking 모델
             _llm_instances[use_case] = ChatGoogleGenerativeAI(
-                model='gemini-3-pro-preview',
+                model='gemini-2.5-pro',
                 temperature=0.0
             )
         elif use_case == "generation":
