@@ -401,9 +401,15 @@ class AgenticRAG:
 
         try:
             # 1단계: Tool calling 완료까지 실행 (non-streaming)
+            graph_start = time.time()
+            print("⏱️  그래프 실행 시작...")
+
             final_state = None
             for event in self.graph.stream(initial_state):
                 final_state = event
+
+            graph_time = time.time() - graph_start
+            print(f"⏱️  그래프 실행 완료: {graph_time:.2f}초")
 
             # 마지막 상태에서 메시지 추출
             if not final_state:
@@ -417,15 +423,14 @@ class AgenticRAG:
             # 마지막 메시지가 AI의 답변이면 그것을 스트리밍
             last_msg = messages[-1]
             if hasattr(last_msg, 'content') and isinstance(last_msg.content, str):
-                # 이미 생성된 답변을 청크로 나누어 yield
+                # 이미 생성된 답변을 청크로 나누어 스트리밍 (지연 없이)
                 answer_text = last_msg.content
-                print("📝 답변 생성 완료, 스트리밍 중...")
+                print(f"📝 답변 생성 완료 ({len(answer_text)}자), 스트리밍 중...")
 
-                # 5자씩 나누어 스트리밍 (타이핑 효과)
-                chunk_size = 5
+                # 10자씩 묶어서 스트리밍 (프론트엔드에서 타이핑 효과 처리)
+                chunk_size = 10
                 for i in range(0, len(answer_text), chunk_size):
                     chunk_text = answer_text[i:i+chunk_size]
-                    print(f"📤 Chunk ({len(chunk_text)}자): {chunk_text[:50]}...")
                     full_answer += chunk_text
                     yield chunk_text
             else:
