@@ -1,8 +1,13 @@
 import os
 from dotenv import load_dotenv
 
-# 환경변수는 바로 로드 (로컬 개발용, .env 파일이 없으면 무시)
-load_dotenv()
+# 환경변수 로드 (CI 테스트 환경에서는 .env.test 우선 로드)
+if os.getenv('CI') and os.path.exists('.env.test'):
+    # GitHub Actions CI 환경
+    load_dotenv('.env.test', override=True)
+else:
+    # 로컬 개발 환경
+    load_dotenv()  # .env 파일이 없으면 무시
 
 # 법령 API
 LAW_API_SERVICE = os.getenv('LAW_API_SERVICE')
