@@ -5,9 +5,11 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uuid
 import time
+import json
 
 # backend 경로 추가
 backend_path = Path(__file__).parent.parent / 'backend'
@@ -77,7 +79,7 @@ def health():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request, http_response: Response):
     """
-    채팅 엔드포인트
+    채팅 엔드포인트 (Non-streaming)
 
     Args:
         request: ChatRequest
@@ -154,6 +156,70 @@ async def chat(request: ChatRequest, http_request: Request, http_response: Respo
             status_code=status_code,
             detail=f"Error processing question: {error_message}"
         )
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest, http_request: Request, http_response: Response):
+    """
+    채팅 엔드포인트 (Streaming)
+
+    Args:
+        request: ChatRequest
+            - question: 사용자 질문
+            - session_id: 세션 ID (선택)
+
+    Returns:
+        StreamingResponse (Server-Sent Events)
+            - data: {"chunk": "텍스트", "done": false}
+            - data: {"done": true, "session_id": "..."}
+    """
+    # 기기 단위 식별자
+    def ensure_device_id(req: Request, res: Response) -> str:
+        existing = req.cookies.get("device_id")
+        if existing:
+            return existing
+        new_id = str(uuid.uuid4())
+        res.set_cookie(
+            key="device_id",
+            value=new_id,
+            max_age=60 * 60 * 24 * 365 * 2,
+            samesite="lax",
+        )
+        return new_id
+
+    device_id = ensure_device_id(http_request, http_response)
+    session_id = request.session_id or device_id
+
+    async def event_generator():
+        """SSE 이벤트 생성"""
+        try:
+            agent_instance = get_agent()
+
+            # 스트리밍 시작
+            for chunk in agent_instance.run_stream(request.question, session_id=session_id):
+                # SSE 형식으로 전송
+                yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
+
+            # 완료 신호
+            yield f"data: {json.dumps({'done': True, 'session_id': session_id})}\n\n"
+
+        except Exception as e:
+            # 에러 전송
+            error_data = {
+                'error': str(e),
+                'done': True
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Nginx 버퍼링 비활성화
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn

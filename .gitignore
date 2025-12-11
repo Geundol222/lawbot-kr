@@ -28,6 +28,7 @@ ENV/
 *.swp
 *.swo
 .DS_Store
+.claude
 
 # 백업
 temp_backup/

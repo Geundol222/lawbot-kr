@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { chatAPI } from '@/lib/api';
+import { chatStreamAPI } from '@/lib/api';
 import { useStats } from '@/contexts/StatsContext';
 
 interface Message {
@@ -47,39 +47,92 @@ export default function ChatInterface() {
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMessage]);
+    const question = input;
     setInput('');
     setLoading(true);
 
     const startTime = Date.now();
 
-    try {
-      const response = await chatAPI({
-        question: input,
-        session_id: sessionId,
-      });
-
-      const responseTime = (Date.now() - startTime) / 1000; // Convert to seconds
-      updateStats(responseTime, true);
-
-      const assistantMessage: Message = {
+    // 임시 어시스턴트 메시지 (스트리밍으로 업데이트될 것)
+    const tempMessageIndex = messages.length + 1;
+    setMessages(prev => [
+      ...prev,
+      {
         role: 'assistant',
-        content: response.answer,
+        content: '',
         timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, assistantMessage]);
+      },
+    ]);
 
+    let fullResponse = '';
+
+    try {
+      await chatStreamAPI(
+        {
+          question,
+          session_id: sessionId,
+        },
+        // onChunk: 청크가 올 때마다 업데이트
+        (chunk: string) => {
+          fullResponse += chunk;
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[tempMessageIndex] = {
+              role: 'assistant',
+              content: fullResponse + '▌', // 타이핑 커서
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onDone: 완료되면 커서 제거
+        () => {
+          const responseTime = (Date.now() - startTime) / 1000;
+          updateStats(responseTime, true);
+
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[tempMessageIndex] = {
+              role: 'assistant',
+              content: fullResponse, // 커서 제거
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+          setLoading(false);
+        },
+        // onError: 에러 처리
+        (error: string) => {
+          console.error('Chat error:', error);
+          const responseTime = (Date.now() - startTime) / 1000;
+          updateStats(responseTime, false);
+
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[tempMessageIndex] = {
+              role: 'assistant',
+              content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+          setLoading(false);
+        }
+      );
     } catch (error) {
-      console.error('Chat error:', error);
+      console.error('Unexpected error:', error);
       const responseTime = (Date.now() - startTime) / 1000;
       updateStats(responseTime, false);
 
-      const errorMessage: Message = {
-        role: 'assistant',
-        content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[tempMessageIndex] = {
+          role: 'assistant',
+          content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
+          timestamp: new Date(),
+        };
+        return newMessages;
+      });
       setLoading(false);
     }
   };
