@@ -74,22 +74,22 @@ jobs:
         timeout=600
         elapsed=0
         while [ $elapsed -lt $timeout ]; do
-          # PR 상태 확인 (전체 상태만 확인)
-          STATUS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[].status' | sort -u)
-          CONCLUSIONS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[].conclusion' | grep -v "null" | sort -u)
+          # Auto-merge 워크플로우 자체를 제외하고 CI 워크플로우만 확인
+          CI_STATUS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[] | select(.name != "Create PR and Auto-Merge to Main") | .status' | sort -u)
+          CI_CONCLUSIONS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[] | select(.name != "Create PR and Auto-Merge to Main") | .conclusion' | grep -v "null" | sort -u)
 
-          echo "Current status: $STATUS"
-          echo "Current conclusions: $CONCLUSIONS"
+          echo "CI status (excluding auto-merge): $CI_STATUS"
+          echo "CI conclusions: $CI_CONCLUSIONS"
 
           # FAILURE가 있으면 실패
-          if echo "$CONCLUSIONS" | grep -q "FAILURE"; then
+          if echo "$CI_CONCLUSIONS" | grep -q "FAILURE"; then
             echo "❌ CI checks failed!"
             exit 1
           fi
 
-          # 모든 체크가 COMPLETED이고 모든 conclusion이 SUCCESS면 성공
-          if ! echo "$STATUS" | grep -qE "PENDING|IN_PROGRESS|QUEUED"; then
-            if echo "$CONCLUSIONS" | grep -q "SUCCESS" && ! echo "$CONCLUSIONS" | grep -qE "FAILURE|CANCELLED"; then
+          # 모든 CI 체크가 COMPLETED이고 모든 conclusion이 SUCCESS면 성공
+          if ! echo "$CI_STATUS" | grep -qE "PENDING|IN_PROGRESS|QUEUED"; then
+            if echo "$CI_CONCLUSIONS" | grep -q "SUCCESS" && ! echo "$CI_CONCLUSIONS" | grep -qE "FAILURE|CANCELLED"; then
               echo "✅ All CI checks passed!"
               break
             fi
