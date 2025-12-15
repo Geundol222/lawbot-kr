@@ -14,13 +14,25 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ⭐ 임베딩 모델 미리 다운로드 (이미지에 포함) ⭐
-# Docker 이미지 빌드 시 한 번만 다운로드되고, 컨테이너 실행 시에는 다운로드 안 함!
-RUN python -c "\
-from sentence_transformers import SentenceTransformer; \
-print('📥 임베딩 모델 다운로드 중... (2.5GB)'); \
-model = SentenceTransformer('intfloat/multilingual-e5-large-instruct'); \
-print('✅ 모델이 이미지에 포함되었습니다!')"
+# HF 캐시 경로 (필요 시)
+ENV HF_HOME=/app/.cache/huggingface
+
+# ⭐ 모델 미리 다운로드 (이미지에 포함) ⭐
+# 1) 임베딩 모델
+RUN python - <<'PY'
+from sentence_transformers import SentenceTransformer
+print("📥 임베딩 모델 다운로드 중... (intfloat/multilingual-e5-large-instruct, ~2.5GB)")
+SentenceTransformer("intfloat/multilingual-e5-large-instruct")
+print("✅ 임베딩 모델 다운로드 완료!")
+PY
+
+# 2) 리랭커 모델 (dragonkue/bge-reranker-v2-m3-ko)
+RUN python - <<'PY'
+from sentence_transformers import CrossEncoder
+print("📥 리랭커 다운로드 중... (dragonkue/bge-reranker-v2-m3-ko)")
+CrossEncoder("dragonkue/bge-reranker-v2-m3-ko")
+print("✅ 리랭커 다운로드 완료!")
+PY
 
 # 애플리케이션 코드 복사
 COPY backend/ ./backend/

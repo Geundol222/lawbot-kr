@@ -15,7 +15,7 @@ import json
 backend_path = Path(__file__).parent.parent / 'backend'
 sys.path.insert(0, str(backend_path))
 
-from src.agentic_rag import AgenticRAG
+from src.agentic_rag import AgenticRAG, preload_embedding_model
 from src.monitoring import get_wandb_logger, FastAPILogger
 
 # FastAPI 앱
@@ -51,6 +51,13 @@ def get_agent():
         agent = AgenticRAG()
         print("✅ AgenticRAG 초기화 완료")
     return agent
+
+# 앱 시작 시 임베딩 모델 미리 로드
+@app.on_event("startup")
+async def startup_event():
+    """FastAPI 앱 시작 시 실행"""
+    print("🚀 FastAPI 앱 시작 - 임베딩 모델 로딩 시작...")
+    preload_embedding_model()
 
 # Request/Response 모델
 class ChatRequest(BaseModel):

@@ -72,34 +72,6 @@ export default function ChatInterface() {
     ]);
 
     let fullResponse = '';
-    let isFirstChunk = true;
-    let displayQueue: string[] = [];
-    let isDisplaying = false;
-
-    // 큐에서 한글자씩 천천히 표시하는 함수
-    const displayCharacters = () => {
-      if (displayQueue.length === 0) {
-        isDisplaying = false;
-        return;
-      }
-
-      isDisplaying = true;
-      const char = displayQueue.shift()!;
-      fullResponse += char;
-
-      setMessages(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          role: 'assistant',
-          content: fullResponse + '▌',
-          timestamp: new Date(),
-        };
-        return newMessages;
-      });
-
-      // 20ms 후 다음 글자 표시
-      setTimeout(displayCharacters, 20);
-    };
 
     try {
       await chatStreamAPI(
@@ -107,50 +79,60 @@ export default function ChatInterface() {
           question,
           session_id: sessionId,
         },
-        // onChunk: 청크가 올 때마다 큐에 추가
-        (chunk: string) => {
-          // 첫 청크면 로딩 메시지 제거
-          if (isFirstChunk) {
-            isFirstChunk = false;
-          }
-
-          // 청크의 각 글자를 큐에 추가
-          for (const char of chunk) {
-            displayQueue.push(char);
-          }
-
-          // 표시 중이 아니면 시작
-          if (!isDisplaying) {
-            displayCharacters();
-          }
-        },
-        // onDone: 완료되면 큐가 비워질 때까지 기다린 후 커서 제거
+        // onSearching: 법령 검색 중
         () => {
-          // 큐가 비워질 때까지 대기
-          const waitForQueue = () => {
-            if (displayQueue.length > 0 || isDisplaying) {
-              setTimeout(waitForQueue, 100);
-              return;
-            }
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: '📚 법령을 검색 중입니다...',
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onCheckingExceptions: 예외조항 확인 중
+        (articles: string[], reason: string) => {
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: `💭 예외 조항이 있는 것 같습니다. 예외 조항을 검색중입니다...\n\n확인할 조문: ${articles.join(', ')}`,
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onAnswerChunk: 실시간 스트리밍 (LLM에서 직접 전송)
+        (chunk: string) => {
+          fullResponse += chunk;
 
-            // 큐가 비워졌으면 커서 제거
-            const responseTime = (Date.now() - startTime) / 1000;
-            updateStats(responseTime, true);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: fullResponse + '▌',  // 커서 표시
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onDone: 완료
+        () => {
+          const responseTime = (Date.now() - startTime) / 1000;
+          updateStats(responseTime, true);
 
-            setMessages(prev => {
-              const newMessages = [...prev];
-              newMessages[newMessages.length - 1] = {
-                role: 'assistant',
-                content: fullResponse, // 커서 제거
-                timestamp: new Date(),
-              };
-              return newMessages;
-            });
-            setLoading(false);
-            setIsStreaming(false);
-          };
-
-          waitForQueue();
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: fullResponse,  // 커서 제거
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+          setLoading(false);
+          setIsStreaming(false);
         },
         // onError: 에러 처리
         (error: string) => {
@@ -162,7 +144,7 @@ export default function ChatInterface() {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1] = {
               role: 'assistant',
-              content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
+              content: `❌ ${error}\n\n죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.`,
               timestamp: new Date(),
             };
             return newMessages;

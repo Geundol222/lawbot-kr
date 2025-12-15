@@ -31,37 +31,30 @@ class AgentStreaming:
         self.wandb_logger = wandb_logger
 
     def _run_stream_sync(self, question: str, session_id: str, start_time: float):
-        """동기 스트리밍 로직 (간단하고 안정적)"""
+        """동기 스트리밍 로직 - SSE 이벤트 전송"""
+        import json
         full_answer = ""
+        law_content = ""  # 검색된 법령 내용 저장
 
-        # 초기 메시지
+        # 초기 메시지 - 그래프용 (도구 호출만)
         initial_messages = [
             SystemMessage(
-                content="""한국 법률 상담 AI입니다. 반드시 아래 단계를 따라 작업하세요:
+                content="""당신은 한국 법령 정보 수집 에이전트입니다. 도구만 호출하세요.
 
-1단계: search_vector_db(질문)로 벡터 DB 검색
+**필수 플로우:**
+1. search_vector_db(사용자 질문) - 벡터 DB에서 먼저 검색
+2. 벡터 검색 성공 시:
+   - check_exceptions_needed(법령 내용, 질문)로 예외 조항 필요 여부 판단
+   - 예외 조항이 필요하면 해당 조문 추가 검색
+3. 벡터 검색 실패 시 (VECTOR_DB_NO_MATCH):
+   - search_law_by_api(법령명, 질문)로 직접 검색
+   - check_exceptions_needed(법령 내용, 질문)로 예외 조항 확인
 
-2단계:
-  A. 벡터 검색 성공 시 (유사도 0.7 이상):
-     → 검색 결과에 "내용" 필드가 포함되어 있습니다
-     → 즉시 해당 내용으로 답변 작성 (추가 도구 호출 금지!)
-     → get_full_article_content 호출하지 마세요!
-
-  B. 벡터 검색 실패 시 (VECTOR_DB_NO_MATCH):
-     → search_law_by_api(법령명)로 API 검색
-     → 예: "택배 분실" → search_law_by_api("전자상거래법")
-
-3단계: 조회한 법령 내용으로 답변 작성
-
-답변 형식:
-- 요약
-- 근거 법령 (법령명 + 조문)
-- 조문 내용
-
-중요 규칙:
-1. 벡터 검색 결과에 "내용"이 있으면 바로 답변 작성! (API 호출 금지)
-2. get_full_article_content는 특별한 경우에만 사용 (벡터 검색에서 내용이 없을 때)
-3. 동일한 도구를 반복 호출하지 마세요"""
+**중요 규칙:**
+- 도구 호출만 하세요 (텍스트 답변 작성 금지)
+- 같은 법령을 중복 검색하지 마세요
+- check_exceptions_needed 결과에 따라 추가 조문 검색
+- 충분한 정보를 얻으면 종료하세요"""
             ),
             HumanMessage(content=question)
         ]
@@ -73,85 +66,190 @@ class AgentStreaming:
         }
 
         try:
-            # 1단계: Tool calling 완료까지 실행 (non-streaming)
+            # 1단계: Tool calling을 단계별로 실행하며 SSE 이벤트 전송
             graph_start = time.time()
             print("⏱️  그래프 실행 시작...")
 
             final_state = None
+            last_tool_name = None
+
             for event in self.graph.stream(initial_state):
                 final_state = event
+
+                # 현재 노드 확인
+                node_name = list(event.keys())[0] if event else None
+                node_data = list(event.values())[0] if event else None
+
+                if node_data and 'messages' in node_data:
+                    last_msg = node_data['messages'][-1]
+
+                    # Tool 메시지 감지 (Tool 실행 완료)
+                    if hasattr(last_msg, '__class__') and last_msg.__class__.__name__ == 'ToolMessage':
+                        tool_content = last_msg.content if hasattr(last_msg, 'content') else ""
+
+                        # 법령 검색 완료
+                        if last_tool_name in ['search_vector_db', 'search_law_by_api']:
+                            law_content = tool_content
+                            # SSE 이벤트 전송하지 않음 (프론트에서 자동 표시)
+
+                        # 예외조항 확인 완료
+                        elif last_tool_name == 'check_exceptions_needed':
+                            try:
+                                result = json.loads(tool_content)
+                                if result.get('needed'):
+                                    # 예외조항 필요 - SSE 이벤트 전송
+                                    event_data = json.dumps({
+                                        "type": "checking_exceptions",
+                                        "articles": result.get('articles_to_search', []),
+                                        "reason": result.get('reason', '')
+                                    }, ensure_ascii=False)
+                                    yield f"data: {event_data}\n\n"
+                            except:
+                                pass
+
+                    # AI 메시지 감지 (Tool 호출 요청)
+                    elif hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                        for tool_call in last_msg.tool_calls:
+                            tool_name = tool_call['name']
+                            last_tool_name = tool_name
+
+                            # 법령 검색 시작
+                            if tool_name in ['search_vector_db', 'search_law_by_api']:
+                                event_data = json.dumps({
+                                    "type": "searching",
+                                    "message": "법령을 검색 중입니다..."
+                                }, ensure_ascii=False)
+                                yield f"data: {event_data}\n\n"
 
             graph_time = time.time() - graph_start
             print(f"⏱️  그래프 실행 완료: {graph_time:.2f}초")
 
             # 마지막 상태에서 메시지 추출
             if not final_state:
-                yield "오류: 응답을 생성할 수 없습니다."
+                error_event = json.dumps({
+                    "type": "error",
+                    "message": "응답을 생성할 수 없습니다."
+                }, ensure_ascii=False)
+                yield f"data: {error_event}\n\n"
                 return
 
             # 가장 마지막 노드의 출력 가져오기
             last_node_output = list(final_state.values())[-1]
             messages = last_node_output.get("messages", [])
 
-            # 마지막 메시지 확인
-            last_msg = messages[-1]
+            # 진단: 마지막 AI 메시지 확인
+            print(f"\n📊 총 메시지 개수: {len(messages)}")
+            for i, msg in enumerate(messages[-3:]):  # 마지막 3개만
+                msg_type = getattr(msg, 'type', 'unknown')
+                has_tool_calls = hasattr(msg, 'tool_calls') and bool(msg.tool_calls)
+                content_preview = str(getattr(msg, 'content', ''))[:100]
+                print(f"  [{i}] {msg_type} | tool_calls={has_tool_calls} | content={content_preview}")
 
-            # 답변 텍스트 추출 (문자열 또는 리스트 형식 모두 처리)
-            answer_text = None
-            if hasattr(last_msg, 'content') and last_msg.content:
-                content = last_msg.content
+            # 최종 답변 시작 이벤트
+            answer_start_event = json.dumps({
+                "type": "answer_start",
+                "message": ""
+            }, ensure_ascii=False)
+            yield f"data: {answer_start_event}\n\n"
 
-                # 문자열인 경우
-                if isinstance(content, str):
-                    answer_text = content
-                # 리스트 형식인 경우 (Gemini 응답)
-                elif isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and 'text' in part:
-                            answer_text = part['text']
-                            break
+            # ========== 답변 생성: 스트리밍 ==========
+            # 그래프가 수집한 법령 정보로 실시간 답변 생성
+            print(f"📝 법령 정보 수집 완료, 실시간 답변 생성 시작...")
 
-            # 답변이 있으면 스트리밍
-            if answer_text:
-                print(f"📝 답변 생성 완료 ({len(answer_text)}자), 스트리밍 중...")
+            # 마지막 AI 메시지 제거 (그래프에서 생성된 영어 답변)
+            filtered_messages = []
+            for msg in messages:
+                if hasattr(msg, 'type') and msg.type == 'ai':
+                    # tool_calls가 있는 AI 메시지만 유지
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        filtered_messages.append(msg)
+                else:
+                    filtered_messages.append(msg)
 
-                # 1자씩 스트리밍 (자연스러운 타이핑 효과)
-                for char in answer_text:
-                    full_answer += char
-                    yield char
-                    # 약간의 딜레이로 자연스러운 속도 조절 (30ms)
-                    time.sleep(0.03)
-            else:
-                # 답변이 없으면 LLM에게 직접 물어보기
-                print(f"⚠️  답변 텍스트를 찾을 수 없음, LLM에게 답변 요청...")
+            # 답변 생성용 프롬프트 추가
+            answer_generation_prompt = SystemMessage(
+                content="""수집된 법령 정보를 바탕으로 답변을 작성하세요.
 
-                for chunk in self.llm.stream(messages):
-                    chunk_text = ""
-                    if hasattr(chunk, 'content'):
-                        content = chunk.content
-                        if not content:
-                            continue
+**답변 형식:**
 
-                        if isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict) and 'text' in part:
-                                    chunk_text += part['text']
-                        elif isinstance(content, str):
-                            chunk_text = content
-                        else:
-                            chunk_text = str(content)
+## 신뢰도
+[0.0 ~ 1.0 점수]
+- 1.0: 질문에 정확히 답하는 법령 발견
+- 0.5 ~ 0.9: 관련 법령은 있으나 직접적 답변 아님
+- 0.0 ~ 0.4: 관련 법령 부족
 
-                        if chunk_text:
-                            full_answer += chunk_text
-                            yield chunk_text
+**신뢰도 0.7 이하일 경우 반드시 다음 경고 추가:**
+> ⚠️ 찾아본 정보는 다음과 같습니다만 해당 정보는 정확한 정보가 아닐 수 있습니다. 추가 검색이 필요할 수 있습니다.
+
+## 결론
+[명확한 답]
+
+## 근거 법령
+- 법령명 조문
+
+## 법령 내용
+**법령명 조문**
+[원문]
+
+## 구체적 설명
+[상세 설명]"""
+            )
+
+            # 답변 생성 메시지 구성
+            answer_messages = filtered_messages + [answer_generation_prompt]
+
+            # 디버깅: 답변 생성에 사용되는 메시지 확인
+            print(f"\n🔍 [DEBUG] 답변 생성용 메시지 개수: {len(answer_messages)}")
+            for i, msg in enumerate(answer_messages[-5:]):  # 마지막 5개만
+                msg_type = getattr(msg, 'type', 'unknown')
+                content_preview = str(getattr(msg, 'content', ''))[:150]
+                print(f"  [{i}] {msg_type}: {content_preview}...")
+
+            # 실시간 스트리밍
+            print(f"\n🔍 [DEBUG] LLM 스트리밍 시작...")
+            chunk_count = 0
+            for chunk in self.llm.stream(answer_messages):
+                chunk_count += 1
+                if chunk_count <= 3:  # 처음 3개 청크만 로깅
+                    print(f"  [청크 {chunk_count}] {chunk}")
+                chunk_text = ""
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+                    if not content:
+                        continue
+
+                    if isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict) and 'text' in part:
+                                chunk_text += part['text']
+                    elif isinstance(content, str):
+                        chunk_text = content
+                    else:
+                        chunk_text = str(content)
+
+                    if chunk_text:
+                        full_answer += chunk_text
+                        chunk_event = json.dumps({
+                            "type": "answer_chunk",
+                            "text": chunk_text
+                        }, ensure_ascii=False)
+                        yield f"data: {chunk_event}\n\n"
+
+            print(f"\n🔍 [DEBUG] 총 {chunk_count}개 청크 수신")
+            print(f"📝 답변 스트리밍 완료: {len(full_answer)}자")
 
         except Exception as e:
             import traceback
-            error_msg = f"\n\n❌ 오류 발생: {str(e)}\n"
+            error_msg = f"❌ 오류 발생: {str(e)}"
             print(f"❌ 오류: {e}")
             print(f"❌ 상세 traceback:")
             traceback.print_exc()
-            yield error_msg
+
+            error_event = json.dumps({
+                "type": "error",
+                "message": error_msg
+            }, ensure_ascii=False)
+            yield f"data: {error_event}\n\n"
             full_answer += error_msg
 
         print(f"\n{'='*60}")
