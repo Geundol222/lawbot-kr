@@ -146,7 +146,8 @@ def search_vector_db(query: str) -> str:
         result_text += f"유사도: {r['similarity']:.2f}\n"
         result_text += f"내용: {r.get('content', '내용 없음')}\n\n"
 
-    result_text += "\n✅ 위 조문 내용으로 답변을 작성하세요. 필요시 check_exceptions_needed로 예외 조항을 확인하세요!"
+    result_text += "\n✅ 위 조문 내용으로 답변을 작성하세요. 추가 도구 호출 불필요.\n"
+    result_text += "필요시 check_exceptions_needed로 예외 조항을 확인하세요!"
 
     return result_text
 
@@ -287,7 +288,7 @@ def check_exceptions_needed(law_content: str, user_question: str) -> str:
 
 
 @tool
-def search_law_by_api(law_name: str, query: str, article_number: str = None) -> str:
+def search_law_by_api(law_name: str, query: str = "", article_number: str = None) -> str:
     """
     API로 법령 검색 후 semantic search로 관련 조문 추출
 
@@ -296,7 +297,7 @@ def search_law_by_api(law_name: str, query: str, article_number: str = None) -> 
 
     Args:
         law_name: 검색할 법령명 (예: "근로기준법", "민법", "병역법")
-        query: 사용자 질문 (semantic search에 사용)
+        query: 사용자 질문 (semantic search에 사용, 특정 조문만 원하면 빈 문자열 가능)
         article_number: 선택적 조문 번호 (특정 조문을 원하면 지정)
 
     Returns:
@@ -403,13 +404,13 @@ class AgenticRAG:
         self.llm = get_llm("flash")
 
         # ⭐ Tools 바인딩 ⭐
+        # 외부 노출(테스트) 기준 3개, 내부용 check_exceptions_needed는 별도 바인딩
         self.tools = [
             search_vector_db,
             get_full_article_content,
             search_law_by_api,
-            check_exceptions_needed
         ]
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        self.llm_with_tools = self.llm.bind_tools(self.tools + [check_exceptions_needed])
 
         # WandB 로거 초기화 (세션별)
         try:
