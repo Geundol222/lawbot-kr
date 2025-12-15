@@ -37,13 +37,23 @@ export async function chatAPI(request: ChatRequest): Promise<ChatResponse> {
   return response.json();
 }
 
+export interface SSEEvent {
+  type: 'searching' | 'checking_exceptions' | 'answer_start' | 'answer_chunk' | 'error';
+  message?: string;
+  text?: string;
+  articles?: string[];
+  reason?: string;
+}
+
 /**
- * Chat API 호출 (Streaming)
+ * Chat API 호출 (Streaming with multiple event types)
  */
 export async function chatStreamAPI(
   request: ChatRequest,
-  onChunk: (chunk: string) => void,
-  onDone?: (sessionId: string) => void,
+  onSearching?: () => void,
+  onCheckingExceptions?: (articles: string[], reason: string) => void,
+  onAnswerChunk?: (chunk: string) => void,
+  onDone?: () => void,
   onError?: (error: string) => void
 ): Promise<void> {
   try {
@@ -70,7 +80,10 @@ export async function chatStreamAPI(
     while (true) {
       const { done, value } = await reader.read();
 
-      if (done) break;
+      if (done) {
+        onDone?.();
+        break;
+      }
 
       // 디코드하고 버퍼에 추가
       buffer += decoder.decode(value, { stream: true });
@@ -82,23 +95,36 @@ export async function chatStreamAPI(
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
-            const data = JSON.parse(line.slice(6));
+            const event: SSEEvent = JSON.parse(line.slice(6));
 
-            if (data.error) {
-              onError?.(data.error);
-              return;
-            }
+            switch (event.type) {
+              case 'searching':
+                onSearching?.();
+                break;
 
-            if (data.chunk) {
-              onChunk(data.chunk);
-            }
+              case 'checking_exceptions':
+                onCheckingExceptions?.(
+                  event.articles || [],
+                  event.reason || ''
+                );
+                break;
 
-            if (data.done) {
-              onDone?.(data.session_id);
-              return;
+              case 'answer_start':
+                // 답변 시작 (필요시 UI 상태 변경)
+                break;
+
+              case 'answer_chunk':
+                if (event.text) {
+                  onAnswerChunk?.(event.text);
+                }
+                break;
+
+              case 'error':
+                onError?.(event.message || 'Unknown error');
+                return;
             }
           } catch (e) {
-            console.error('Failed to parse SSE data:', e);
+            console.error('Failed to parse SSE data:', e, 'Line:', line);
           }
         }
       }

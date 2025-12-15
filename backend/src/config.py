@@ -35,15 +35,15 @@ def validate_required_env_vars():
     missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
 
     if missing_vars:
-        error_msg = f"❌ 필수 환경변수가 설정되지 않았습니다: {', '.join(missing_vars)}"
+        error_msg = f"[ERROR] 필수 환경변수가 설정되지 않았습니다: {', '.join(missing_vars)}"
         print(error_msg)
-        print("\n💡 Hugging Face Spaces에서:")
-        print("   Settings → Variables → Add variable에서 환경변수를 설정하세요.")
-        print("\n💡 로컬 개발 환경에서:")
+        print("\n[INFO] Hugging Face Spaces에서:")
+        print("   Settings -> Variables -> Add variable에서 환경변수를 설정하세요.")
+        print("\n[INFO] 로컬 개발 환경에서:")
         print("   .env 파일을 생성하고 환경변수를 설정하세요.")
         raise ValueError(error_msg)
 
-    print("✅ 환경변수 로드 완료:")
+    print("[OK] 환경변수 로드 완료:")
     print(f"   - SUPABASE_URL: {'설정됨' if SUPABASE_URL else '없음'}")
     print(f"   - SUPABASE_ANON_KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
     print(f"   - GOOGLE_API_KEY: {'설정됨' if GOOGLE_API_KEY else '없음'}")

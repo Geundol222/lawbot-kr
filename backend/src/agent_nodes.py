@@ -69,14 +69,18 @@ class AgentNodes:
         }
 
     def execute_tools(self, state: AgentState) -> AgentState:
-        """도구 실행 (ToolNode 대체)"""
+        """도구 실행 (ToolNode 대체) - 병렬 처리"""
         messages = state['messages']
         last_message = messages[-1]
 
         # 도구 호출 실행
         tool_messages = []
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            for tool_call in last_message.tool_calls:
+            import asyncio
+            from concurrent.futures import ThreadPoolExecutor
+
+            def execute_single_tool(tool_call):
+                """단일 도구 실행 (Thread-safe)"""
                 tool_name = tool_call['name']
                 tool_args = tool_call['args']
                 tool_id = tool_call['id']
@@ -93,20 +97,16 @@ class AgentNodes:
                         try:
                             result = tool.invoke(tool_args)
                             result_str = str(result)
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=result_str,
-                                    tool_call_id=tool_id
-                                )
+                            tool_message = ToolMessage(
+                                content=result_str,
+                                tool_call_id=tool_id
                             )
                         except Exception as e:
                             success = False
                             result_str = f"도구 실행 오류: {str(e)}"
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=result_str,
-                                    tool_call_id=tool_id
-                                )
+                            tool_message = ToolMessage(
+                                content=result_str,
+                                tool_call_id=tool_id
                             )
 
                         execution_time = time.time() - start_time
@@ -122,7 +122,20 @@ class AgentNodes:
                                 success=success
                             )
 
-                        break
+                        return tool_message
+                return None
+
+            # 병렬 실행
+            if len(last_message.tool_calls) > 1:
+                print(f"⚡ {len(last_message.tool_calls)}개 도구를 병렬 실행합니다...")
+                with ThreadPoolExecutor(max_workers=len(last_message.tool_calls)) as executor:
+                    results = list(executor.map(execute_single_tool, last_message.tool_calls))
+                    tool_messages = [r for r in results if r is not None]
+            else:
+                # 단일 도구는 그냥 실행
+                result = execute_single_tool(last_message.tool_calls[0])
+                if result:
+                    tool_messages = [result]
 
         return {
             "messages": messages + tool_messages,
@@ -135,9 +148,9 @@ class AgentNodes:
         messages = state['messages']
         last_message = messages[-1]
 
-        # 무한 루프 방지: 최대 10회 (벡터검색 → 조문조회 → API검색 → 재시도)
+        # 무한 루프 방지 안전장치: 최대 10회 (매우 여유있게 설정)
         if state.get("tool_calls", 0) >= 10:
-            print("⚠️ 최대 도구 호출 횟수 도달, 종료합니다.")
+            print("⚠️ 최대 도구 호출 횟수 도달 (10회), 강제 종료합니다.")
             return "end"
 
         # ⭐ Function Calling 확인 ⭐
