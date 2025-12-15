@@ -235,6 +235,18 @@ class AgentStreaming:
                         }, ensure_ascii=False)
                         yield f"data: {chunk_event}\n\n"
 
+            # 스트리밍이 비어 있으면 마지막 AI 메시지를 그대로 반환 (테스트/모킹 대비)
+            if chunk_count == 0 and not full_answer:
+                last_ai = next((m for m in reversed(messages) if getattr(m, "type", "") == "ai"), None)
+                fallback_text = str(getattr(last_ai, "content", "") or "")
+                if fallback_text:
+                    full_answer += fallback_text
+                    chunk_event = json.dumps({
+                        "type": "answer_chunk",
+                        "text": fallback_text
+                    }, ensure_ascii=False)
+                    yield f"data: {chunk_event}\n\n"
+
             print(f"\n🔍 [DEBUG] 총 {chunk_count}개 청크 수신")
             print(f"📝 답변 스트리밍 완료: {len(full_answer)}자")
 
