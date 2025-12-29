@@ -14,9 +14,12 @@ backend_path = Path(__file__).parent / 'backend'
 sys.path.insert(0, str(backend_path))
 
 from src.agentic_rag import AgenticRAG, preload_embedding_model
+from src.embeddings.bm25_search import preload_bm25_index
 
 # 임베딩 모델 미리 로드 (앱 시작 시 한 번만)
 preload_embedding_model()
+# BM25 인덱스 미리 빌드 (백그라운드)
+preload_bm25_index(background=True)
 
 # 페이지 설정
 st.set_page_config(
