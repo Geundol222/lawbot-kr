@@ -3,10 +3,12 @@ from supabase import create_client
 import numpy as np
 import time
 from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor
 
 from src.config import SUPABASE_URL, SUPABASE_KEY
 from src.monitoring import get_wandb_logger, VectorSearchLogger
 from src.embeddings.bm25_search import get_bm25_instance
+from src.config import get_llm, llm_invoke_with_retry
 
 class VectorSearch:
     def __init__(self):
@@ -27,52 +29,137 @@ class VectorSearch:
         except Exception:
             self.wandb_logger = None
 
-    def search(self, query: str, top_k: int = 5, threshold: float = 0.0):
-        """유사한 법령 검색 (Semantic + BM25 병렬 후 rerank)
-
-        Args:
-            query: 검색 질문
-            top_k: 반환할 최대 결과 수
-            threshold: 유사도 임계값 (semantic)
+    def _extract_subqueries(self, query: str) -> List[str]:
         """
+        LLM으로 핵심 키워드/구를 뽑되, 실패 시 단순 분할로 대체한다.
+        - 원문 쿼리는 항상 포함
+        - JSON 배열 형태로만 응답을 기대
+        """
+        import re, json
+
+        subs: List[str] = []
+        base = query.strip()
+        if base:
+            subs.append(base)
+
+        prompt = (
+            "주어진 질문에서 핵심 키워드나 구를 2~5개 JSON 배열로만 답하세요. "
+            "불필요한 설명은 금지합니다.\n"
+            f"질문: {query}\n"
+            "예시: [\"5인 미만 사업장\", \"해고예고수당\"]"
+        )
+
+        try:
+            llm = get_llm("flash-lite")
+            response = llm_invoke_with_retry(llm, prompt)
+            raw = response if isinstance(response, str) else getattr(response, "content", "")
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                for p in parsed:
+                    if isinstance(p, str):
+                        t = p.strip()
+                        if 2 <= len(t) <= 80:
+                            subs.append(t)
+        except Exception:
+            # LLM 실패 시 구두점 기반 분할
+            pieces = re.split(r"[\\n\\r\\t,.;?/]+", query)
+            for p in pieces:
+                p = p.strip()
+                if 4 <= len(p) <= 80:
+                    subs.append(p)
+
+        # 중복 제거
+        seen = set()
+        uniq = []
+        for s in subs:
+            norm = s.lower()
+            if norm in seen:
+                continue
+            uniq.append(s)
+            seen.add(norm)
+
+        return uniq[:4]
+    
+    def search(self, query: str, top_k: int = 5, threshold: float = 0.0):
+        """유사한 법령 검색 (하위 쿼리 병렬: Semantic+BM25 → 전체 rerank)"""
         search_start = time.time()
         self.last_results = []
 
-        # 질문 임베딩
-        embedding_start = time.time()
-        query_emb = np.array(self.model.encode(query), dtype=np.float32).tolist()
-        embedding_time = time.time() - embedding_start
+        subqueries = self._extract_subqueries(query)
+        print(f"[DEBUG] 서브쿼리 {len(subqueries)}개: {subqueries}")
 
-        # Semantic (RPC)
-        semantic_results, search_method = self._semantic_search_rpc(query, query_emb, top_k, threshold)
+        all_semantic = []
+        all_bm25 = []
+        embedding_time = 0.0
+        search_method = "semantic"
 
-        # BM25 (키워드)
-        bm25_results = []
-        try:
-            bm25_results = self.bm25.search(query, top_k=top_k * 3)
-        except Exception as e:
-            print(f"⚠️ BM25 검색 실패: {e}")
+        # 서브쿼리 단위로 병렬 실행
+        def run_one(qsub: str):
+            emb_start = time.time()
+            q_emb = np.array(self.model.encode(qsub), dtype=np.float32).tolist()
+            emb_dur = time.time() - emb_start
+            sem_res, smethod = self._semantic_search_rpc(qsub, q_emb, top_k, threshold)
+            bm25_res = self._bm25_search_safe(qsub, top_k * 3)
+            return emb_dur, sem_res, bm25_res, smethod
 
-        # 병합 후 rerank
-        combined = self._merge_results(semantic_results, bm25_results, max_candidates=top_k * 6)
-        reranked = self._rerank(query, combined, top_k)
+        with ThreadPoolExecutor(max_workers=min(4, len(subqueries) * 2)) as executor:
+            futures = [executor.submit(run_one, sq) for sq in subqueries]
+            for fut in futures:
+                emb_dur, sem_res, bm25_res, smethod = fut.result()
+                embedding_time += emb_dur
+                all_semantic.extend(sem_res)
+                all_bm25.extend(bm25_res)
+                search_method = smethod
+                print(f"[DEBUG] 서브쿼리 결과: semantic {len(sem_res)}개, bm25 {len(bm25_res)}개")
 
-        # WandB 로깅
+        combined = self._merge_results(all_semantic, all_bm25, max_candidates=top_k * 6 * len(subqueries))
+        print(f"[DEBUG] 병합 후보: {len(combined)}개 (모든 서브쿼리)")
+        reranked = self._rerank(query, combined, top_k * 2)
+
+        # 원본 쿼리의 semantic 상위 결과는 앞쪽에 유지
+        key = lambda it: f"{it.get('law_name')}::{it.get('article')}"
+        must_keep = []
+        if all_semantic:
+            for s in all_semantic[: min(3, len(all_semantic))]:
+                must_keep.append(s)
+
+        ordered = must_keep + reranked
+        dedup = {}
+        for it in ordered:
+            dedup[key(it)] = dedup.get(key(it)) or it
+        final = list(dedup.values())
+
+        final = [r for r in final if r.get("similarity", 0) > 0][:top_k]
+        if not final:
+            final = combined[:top_k]
+
+        for item in final:
+            if "similarity" not in item:
+                item["similarity"] = item.get("score") or item.get("semantic_score") or 0.0
+
         if self.wandb_logger:
             search_time = time.time() - search_start
-            top_score = reranked[0].get("score", 0.0) if reranked else 0.0
+            top_score = final[0].get("score", 0.0) if final else 0.0
             self.wandb_logger.log_search(
                 query=query,
                 search_time=search_time,
                 embedding_time=embedding_time,
-                results_count=len(reranked),
+                results_count=len(final),
                 top_similarity=top_score,
-                search_method=f"{search_method}+BM25+rerank",
+                search_method=f"{search_method}+BM25+rerank(subqueries)",
                 deduplication_count=0
             )
 
-        self.last_results = reranked
-        return reranked
+        self.last_results = final
+        return final
+
+    def _bm25_search_safe(self, query: str, top_k: int) -> List[Dict]:
+        """BM25 검색 안전 호출"""
+        try:
+            return self.bm25.search(query, top_k=top_k)
+        except Exception as e:
+            print(f"⚠️ BM25 검색 실패: {e}")
+            return []
 
     def _semantic_search_rpc(self, query: str, query_emb: List[float], top_k: int, threshold: float):
         """Supabase RPC 기반 semantic 검색 (폴백 포함)"""
@@ -92,21 +179,6 @@ class VectorSearch:
                 print(f"\n[DEBUG] RPC에서 받은 원본 결과 ({len(result.data)}개):")
                 for idx, r in enumerate(result.data[:15], 1):
                     print(f"  [{idx}] {r.get('law_name')} {r.get('article')} - 유사도: {r.get('similarity', 0):.3f}")
-
-                # 제26조 체크
-                has_26 = any(
-                    r.get("article") == "제26조" and "근로기준법" in r.get("law_name", "")
-                    for r in result.data
-                )
-                if has_26:
-                    article_26 = next(
-                        (r for r in result.data if r.get("article") == "제26조" and "근로기준법" in r.get("law_name", "")),
-                        None,
-                    )
-                    if article_26:
-                        print(f"[DEBUG] ✅ 근로기준법 제26조 발견! 유사도: {article_26.get('similarity', 0):.3f}")
-                else:
-                    print(f"[DEBUG] ❌ 근로기준법 제26조가 RPC 결과에 없음!")
 
                 return result.data, search_method
 
@@ -165,6 +237,7 @@ class VectorSearch:
                 "content": item.get("content"),
                 "semantic_score": item.get("similarity"),
                 "bm25_score": item.get("score"),
+                "similarity": item.get("similarity"),
                 "source": sorted(list(existing_sources | {source})),
             }
 
@@ -194,13 +267,21 @@ class VectorSearch:
 
             scores = self.reranker.predict(pairs)
             for cand, score in zip(candidates, scores):
-                cand["score"] = float(score)
+                rerank_score = float(score)
+                cand["rerank_score"] = rerank_score
+                # semantic_score가 있으면 우선 사용, 없으면 rerank 점수 사용
+                sim = cand.get("semantic_score")
+                if sim is None:
+                    sim = rerank_score
+                cand["similarity"] = sim
+                cand["score"] = sim  # 최종 정렬은 similarity 기준으로
 
             candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
         except Exception as e:
             print(f"⚠️ Rerank 실패, semantic 점수로 정렬합니다: {e}")
             for cand in candidates:
-                cand["score"] = cand.get("semantic_score", 0) or 0.0
+                cand["score"] = cand.get("semantic_score", 0) or cand.get("bm25_score", 0) or 0.0
+                cand["similarity"] = cand.get("semantic_score") if cand.get("semantic_score") is not None else cand["score"]
             candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
 
         return candidates[:top_k]
