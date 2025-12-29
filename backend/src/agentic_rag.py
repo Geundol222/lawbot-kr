@@ -6,6 +6,7 @@ Agentic RAG 시스템
 """
 
 from typing import Optional
+import requests
 from langgraph.graph import StateGraph, END
 from langchain.tools import tool
 
@@ -15,9 +16,10 @@ from src.law_api import (
     get_law_article,
     get_law_detail,
     format_jo_number,
-    extract_article_content
+    extract_article_content,
+    fetch_byeol
 )
-from src.config import get_llm
+from src.config import get_llm, llm_invoke_with_retry, LAW_API_SEARCH, LAW_API_SERVICE, LAW_API_OC
 from src.monitoring import get_wandb_logger, AgenticRAGLogger
 from src.agent_state import AgentState
 from src.agent_nodes import AgentNodes
@@ -97,19 +99,17 @@ def search_vector_db(query: str) -> str:
     if not results:
         # flash-lite로 빠르게 핵심 법률 용어만 추출
         lite_llm = get_llm("flash-lite")
-        expansion_prompt = f"""질문에서 핵심 법률 용어만 추출하세요 (조건/수치 제외).
+        expansion_prompt = f"""질문에서 핵심 법률 용어만 추출하세요
 
 질문: {query}
 
 규칙:
-- 수치/조건 제외 (예: "5인 미만", "10년 이상", "30일 이내" 등 제거)
-- 핵심 법률 행위/개념만 (예: "해고 예고수당", "연차 휴가", "퇴직금")
 - 15자 이내
 
 핵심 용어:"""
 
         try:
-            response = lite_llm.invoke(expansion_prompt)
+            response = llm_invoke_with_retry(lite_llm, expansion_prompt)
             core_term = ""
             if hasattr(response, 'content'):
                 content = response.content
@@ -133,6 +133,73 @@ def search_vector_db(query: str) -> str:
         # 유사도 0.7 이상인 결과가 없음
         return "VECTOR_DB_NO_MATCH: 벡터 DB에서 유사도 0.7 이상인 법령을 찾지 못했습니다. search_law_by_api를 사용하여 직접 검색하세요."
 
+    # 판례 요지 조회 헬퍼
+    def fetch_prec_summaries(law_name: str, article: str, limit: int = 3) -> list[str]:
+        summaries = []
+
+        def _flatten(val):
+            if val is None:
+                return ""
+            if isinstance(val, str):
+                return val
+            if isinstance(val, list):
+                return " ".join(_flatten(v) for v in val if v is not None)
+            if isinstance(val, dict):
+                return " ".join(_flatten(v) for v in val.values() if v is not None)
+            return str(val)
+
+        params = {
+            "OC": LAW_API_OC,
+            "target": "prec",
+            "type": "JSON",
+            "JO": f"{law_name} {article}",
+            "display": 20,
+            "page": 1,
+            "search": 2,  # 본문 검색
+        }
+        try:
+            resp = requests.get(LAW_API_SEARCH, params=params, timeout=10)
+            data = resp.json() if resp.text else {}
+            precs = data.get("PrecSearch", {}).get("prec", [])
+            if isinstance(precs, dict):
+                precs = [precs]
+        except Exception as e:
+            print(f"[WARN] 판례 목록 조회 실패: {e}")
+            precs = []
+
+        if not precs:
+            return summaries
+
+        for prec in precs[:limit]:
+            pid = prec.get("판례일련번호")
+            case_name = prec.get("사건명") or prec.get("판례명") or ""
+            case_no = prec.get("사건번호", "")
+            court = prec.get("법원명", "")
+            date = prec.get("선고일자", "")
+            if not pid:
+                continue
+
+            try:
+                d_resp = requests.get(
+                    LAW_API_SERVICE,
+                    params={"OC": LAW_API_OC, "target": "prec", "type": "JSON", "ID": pid},
+                    timeout=10,
+                )
+                d_json = d_resp.json() if d_resp.text else {}
+                prec_root = d_json.get("prec", {})
+                content = prec_root.get("판례내용", {})
+                summary = _flatten(content.get("판결요지", "")).replace("<br/>", " ").replace("<br>", " ").strip()
+                refs = _flatten(content.get("참조조문", "")).replace("<br/>", " ").replace("<br>", " ").strip()
+            except Exception as e:
+                summary = f"(판례 상세 조회 실패: {e})"
+                refs = ""
+
+            summaries.append(
+                f"- [{court} {case_no} ({date})] {case_name}\n  요지: {summary or '요약 없음'}\n  참조조문: {refs or 'N/A'}"
+            )
+
+        return summaries
+
     # 결과를 구조화된 형식으로 반환 (조문 내용 포함)
     print(f"✅ 벡터 검색 성공: {len(results)}개 조문 발견")
     for r in results[:5]:
@@ -144,7 +211,16 @@ def search_vector_db(query: str) -> str:
         result_text += f"법령: {r['law_name']}\n"
         result_text += f"조문: {r['article']}\n"
         result_text += f"유사도: {r['similarity']:.2f}\n"
-        result_text += f"내용: {r.get('content', '내용 없음')}\n\n"
+        result_text += f"내용: {r.get('content', '내용 없음')}\n"
+
+        precs = fetch_prec_summaries(r['law_name'], r['article'], limit=3)
+        if precs:
+            print(f"[DEBUG] 판례 요지 {len(precs)}건 조회: {r['law_name']} {r['article']}")
+            result_text += "관련 판례 요지:\n" + "\n".join(precs) + "\n"
+        else:
+            print(f"[DEBUG] 판례 요지 없음: {r['law_name']} {r['article']}")
+
+        result_text += "\n"
 
     result_text += "\n✅ 위 조문 내용으로 답변을 작성하세요. 추가 도구 호출 불필요.\n"
     result_text += "필요시 check_exceptions_needed로 예외 조항을 확인하세요!"
@@ -223,11 +299,13 @@ def check_exceptions_needed(law_content: str, user_question: str) -> str:
    → 해당 예외 조문 필요
 
 **중요:** 이미 찾은 조문을 다시 검색하지 마세요!
+- 법령 내용이나 질문에 "별표"/"별지"/"서식"이 나오면 byeol_to_search에 "법령명 별표 번호"를 넣어 별표 검색이 필요함을 표시하세요.
 
 응답 (JSON):
 {{
   "needed": True/False,
   "articles_to_search": ["법령명 조문번호"],
+  "byeol_to_search": ["법령명 별표번호"],
   "reason": "이유"
 }}
 
@@ -249,10 +327,15 @@ def check_exceptions_needed(law_content: str, user_question: str) -> str:
 질문: "대통령령에 의해"
 법령: 근로기준법 시행령
 → {{"needed": True, "articles_to_search": [], "reason": "대통령령=시행령 확인 (조문번호 불명확)"}}
+
+예시 5 (별표):
+질문: "근로기준법 별표 1에서 정한 업종?"
+법령: 근로기준법
+→ {{"needed": True, "articles_to_search": [], "byeol_to_search": ["근로기준법 별표 1"], "reason": "질문에서 별표 1을 직접 언급"}}
 """
 
     try:
-        response = lite_llm.invoke(prompt)
+        response = llm_invoke_with_retry(lite_llm, prompt)
 
         # 응답 텍스트 추출
         response_text = ""
@@ -283,8 +366,110 @@ def check_exceptions_needed(law_content: str, user_question: str) -> str:
         return json.dumps({
             "needed": False,
             "articles_to_search": [],
+            "byeol_to_search": [],
             "reason": f"분석 중 오류 발생: {str(e)}"
         }, ensure_ascii=False)
+
+
+@tool
+def search_byeol(law_name: str, byeol_no: str = "1", mst: str = "") -> str:
+    """
+    별표/별지/서식 본문 조회 (법령명 + 별표 번호)
+
+    Args:
+        law_name: 법령명 (예: "근로기준법")
+        byeol_no: 별표 번호 (예: "1", "1의2")
+        mst: (선택) 법령일련번호. 비우면 자동 조회.
+
+    Returns:
+        HTML 프리뷰, 조회 URL, JSON 발췌를 포함한 문자열
+    """
+    return fetch_byeol(law_name=law_name, mst=mst, byeol_no=byeol_no, fmt="HTML")
+
+
+@tool
+def search_prec_by_article(law_name: str, article: str) -> str:
+    """
+    특정 법령/조문을 참조한 판례의 판결요지 조회 (실시간 API)
+
+    Args:
+        law_name: 법령명 (예: "근로기준법")
+        article: 조문 (예: "제26조")
+
+    Returns:
+        상위 3~5개 판례의 요약 리스트
+    """
+    import requests
+
+    def _flatten(val):
+        if val is None:
+            return ""
+        if isinstance(val, str):
+            return val
+        if isinstance(val, list):
+            return " ".join(_flatten(v) for v in val if v is not None)
+        if isinstance(val, dict):
+            return " ".join(_flatten(v) for v in val.values() if v is not None)
+        return str(val)
+
+    # 1) 판례 목록 (본문 검색)
+    params = {
+        "OC": LAW_API_OC,
+        "target": "prec",
+        "type": "JSON",
+        "JO": f"{law_name} {article}",
+        "display": 20,
+        "page": 1,
+        "search": 2,  # 본문 검색
+    }
+    try:
+        resp = requests.get(LAW_API_SEARCH, params=params, timeout=15)
+        data = resp.json() if resp.text else {}
+        precs = data.get("PrecSearch", {}).get("prec", [])
+        if isinstance(precs, dict):
+            precs = [precs]
+    except Exception as e:
+        return f"판례 목록 조회 실패: {e}"
+
+    if not precs:
+        return f"{law_name} {article}를 참조한 판례를 찾지 못했습니다."
+
+    results = []
+    for prec in precs[:5]:
+        prec_id = prec.get("판례일련번호")
+        case_name = prec.get("사건명") or prec.get("판례명") or ""
+        case_no = prec.get("사건번호", "")
+        court = prec.get("법원명", "")
+        date = prec.get("선고일자", "")
+        if not prec_id:
+            continue
+
+        # 2) 판례 상세
+        detail_params = {
+            "OC": LAW_API_OC,
+            "target": "prec",
+            "type": "JSON",
+            "ID": prec_id,
+        }
+        try:
+            d_resp = requests.get(LAW_API_SERVICE, params=detail_params, timeout=15)
+            d_json = d_resp.json() if d_resp.text else {}
+            prec_root = d_json.get("prec", {})
+            content = prec_root.get("판례내용", {})
+            summary = _flatten(content.get("판결요지", "")).replace("<br/>", " ").replace("<br>", " ").strip()
+            refs = _flatten(content.get("참조조문", "")).replace("<br/>", " ").replace("<br>", " ").strip()
+        except Exception as e:
+            summary = f"(판례 상세 조회 실패: {e})"
+            refs = ""
+
+        results.append(
+            f"- [{court} {case_no} ({date})] {case_name}\n  요지: {summary or '요약 없음'}\n  참조조문: {refs or 'N/A'}"
+        )
+
+    if not results:
+        return f"{law_name} {article}를 참조한 판례를 찾지 못했습니다."
+
+    return "=== 관련 판례 요지 ===\n" + "\n\n".join(results)
 
 
 @tool
@@ -303,6 +488,10 @@ def search_law_by_api(law_name: str, query: str = "", article_number: str = None
     Returns:
         질문과 관련성 높은 상위 3-5개 조문
     """
+    # 벡터 검색이 이미 성공한 경우 불필요한 API 호출 방지
+    if vector_search_instance.last_results:
+        return "SKIP_API: 벡터 검색 결과가 이미 있어 API 호출을 건너뜁니다."
+
     # 법령 검색
     search_result = search_law_list(law_name)
 
@@ -408,7 +597,9 @@ class AgenticRAG:
         self.tools = [
             search_vector_db,
             get_full_article_content,
+            search_byeol,
             search_law_by_api,
+            search_prec_by_article,
         ]
         self.llm_with_tools = self.llm.bind_tools(self.tools + [check_exceptions_needed])
 
