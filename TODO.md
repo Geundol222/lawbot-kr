@@ -63,6 +63,7 @@
 - 3가지 용도 → 2가지 모델 (flash, flash-lite)
 - `AgenticRAG` 클래스: 중복 LLM 인스턴스 제거 → 단일 인스턴스
 - 싱글톤 패턴 유지로 메모리 효율화
+- 도구호출과 generating의 역할을 나누어 중복전송이나 꼬임을 방지
 
 3. 스트리밍 기능 완전 구현
 - 기존 문제: 그래프 완료 후 가짜 스트리밍 (5자 청크 즉시 전송)
@@ -163,10 +164,136 @@
 - 보류: 비동기 I/O 도입, Agent 로직 최적화 (효과 대비 개발 노력 높음)
 
 **최종 판단**: 병렬처리 확장보다 임베딩 배치화와 API 안정성 개선 우선
-**상세 분석**: `C:\Users\inc02\.claude\plans\dynamic-swinging-crane.md`
 
 
 ## 2025.12.14
 1. sementic search만으로는 정확한 문서 판별을 할 수 없을 것 같다고 판단 BM25와 metadata 키워드 서치 도입 고려
 2. db검토 결과 일부 db에서 조문 제목 이외에 본문이 포함되어있지 않은 data가 다수 존재하여 해당 부분을 확인하고 re-embedding 진행
 3. 애매한 예외조항 (예: 대통령령이 정한 바에 따라...)을 처리하기 위해 시행령과 시행규칙을 db에 추가 후 추가 search시 해당 법령 서치하는 방안
+
+## 2025.12.16
+1. 별표/별지 조회 유틸 추가
+- backend/src/law_api.py에 MST 조회/별표 HTML·JSON 스니펫 함수 추가(`_find_mst_for_byeol`, `list_byeol`, `get_byeol_html/json`, `fetch_byeol`)
+- 에이전트 툴로 `search_byeol` 추가, 프롬프트에 `byeol_to_search` 필드 반영
+
+2. 반복 도구 호출 방지
+- Agent 상태에 `exceptions_checked` 플래그 추가 (agent_state.py)
+- agent_nodes.py에서 `check_exceptions_needed`를 1회만 허용하도록 필터링, 상태 전달
+- agent_streaming.py 초기 상태에 플래그 추가
+
+3. 테스트 경로/기대값 정리
+- tests/conftest.py에서 backend 경로를 sys.path에 추가해 `src.*` 임포트 오류 해결
+- tests/test_agentic_rag.py 툴 개수 5개로 수정, tests/test_tools.py 유사도 포맷 수정
+- tests/test_law_api.py 조문번호 포맷(6자리) 및 데이터 구조/메시지 검증 수정
+
+
+## 2025.12.29
+1. 코드베이스 전체 점검 및 개선사항 도출
+- 현재 시스템: 벡터검색 → 예외조항 체크 → 추가검색 → LLM 답변 → DB 저장 (평균 7-18초)
+- 기본 기능은 잘 작동하지만 운영 안정성 강화 필요
+
+2. 안정성 개선 계획 (이번주)
+- API 안정성 강화: tenacity로 재시도 로직 추가 (Rate Limit 대응)
+- 스트리밍 안정화: agent_streaming.py 에러 핸들링 강화
+- 동시성 안전성: vector_search.py threading.Lock 추가 (동시 요청 처리)
+- DB 품질 개선: generate_embeddings.py 검증 로직 추가 및 재임베딩
+- Supabase 안정성: 타임아웃 설정으로 무한 대기 방지
+- 앱 로딩 속도 개선: BM25 인덱스 백그라운드 빌드로 시작 시간 단축
+
+3. 성능 최적화 계획 (다음주)
+- Query Expansion 효율화: LLM 호출 및 임베딩 생성 중복 제거
+- 동시성 최적화: ThreadPool max_workers 조정 (8 → 3)
+- 로깅 표준화: 일관된 에러 메시지 형식
+
+4. 추가 기능 계획 (이후)
+- 캐싱 시스템: lru_cache로 조문/판례 API 호출 최적화
+- 벡터 검색 최적화: 재정렬 후보 수 조정 (top_k*6 → top_k*2)
+- 테스트 강화: 통합 테스트 추가
+
+5. 이번주 작업 일정 (12/29 - 1/2)
+**12/29 (일):**
+- ✅ BM25 백그라운드 로딩 (app.py:22, background=True로 변경)
+- ✅ API 재시도 로직 추가 완료
+  - config.py: llm_invoke_with_retry, llm_stream_with_retry 함수 추가
+  - agentic_rag.py: Query Expansion 및 check_exceptions_needed에 적용
+  - vector_search.py: 서브쿼리 추출에 적용
+  - agent_streaming.py: 스트리밍 답변 생성에 적용
+  - 재시도 정책: 최대 3회, 지수 백오프 (2초 → 4초 → 8초)
+- ✅ 근거 법령 미표시 문제 해결
+  - 원인: LLM이 ToolMessage 내용에서 근거 추출 방법을 모름
+  - 해결: agent_streaming.py 프롬프트 명확화 (도구 결과 확인 방법 단계별 지시)
+  - MCP 구조 재평가: 현재 불필요, 프롬프트 개선으로 충분
+- ✅ **평가 메트릭 시스템 구축 완료**
+  - 기존 문제: 모니터링용 로깅만 있고 평가용 메트릭 부재
+  - 해결: 이중 로깅 전략 도입
+    1. 운영 모니터링 (wandb_logger.py): 실시간 성능 추적
+    2. 평가 메트릭 (evaluation_metrics.py): 실험 비교용
+  - 신규 파일:
+    - backend/src/monitoring/evaluation_metrics.py: R@k, MRR, NDCG, Citation F1, Faithfulness 등
+    - backend/src/monitoring/evaluator.py: 오프라인 배치 평가 실행기
+    - datasets/eval_questions.json: 평가용 질문 10개 (카테고리별 분류)
+    - datasets/ground_truth.json: 정답 조문 레이블링 (수동)
+    - datasets/README.md: 데이터셋 사용법 및 메트릭 설명
+  - 평가 메트릭 종류:
+    - Retrieval: Recall@3, Recall@5, MRR, NDCG@3
+    - Citation: Precision, Recall, F1 (답변에 근거 법령 표시율)
+    - Quality: Faithfulness, Relevance, Completeness (LLM 기반 평가)
+    - Cost & Latency: response_time_ms, total_tokens, api_calls
+  - 다음 단계: AgenticRAG에 평가 모드 추가 (vanilla, current, full_self_rag)
+- ✅ **Ground Truth 법령 조문 내용 자동 수집 완료**
+  - 문제 발견: ground_truth.json의 context 필드가 API 검증 없이 임의 작성됨
+  - 해결: 실제 법령 API로 조문 내용 자동 수집
+  - 신규 파일:
+    - scripts/collect_article_content.py: 법령 조문 내용 자동 수집 스크립트
+  - 수집 결과:
+    - 14개 조문 모두 수집 완료 (성공률 100%)
+    - 예시: "민법 750" → "제750조(불법행위의 내용) 고의 또는 과실로..."
+  - ground_truth.json 구조 변경:
+    - 삭제: context 필드 (임의 작성 내용)
+    - 추가: article_content 필드 (API 검증된 실제 조문 내용)
+  - 용도: Faithfulness 평가 시 "정확한 법령 내용" 기준으로 사용
+  - Windows 콘솔 인코딩 이슈 해결 (cp949 → utf-8)
+
+**12/30 (월):**
+- AgenticRAG 평가 모드 구현 (mode 파라미터 추가)
+- run_with_metrics() 메서드 추가 (retrieved_docs, metrics 반환)
+- Supabase 타임아웃 설정
+
+**12/31 (화):**
+- 멀티스레드 안전성 강화 (threading.Lock)
+- 스트리밍 에러 핸들링
+
+**1/1 (수):**
+- 휴식
+
+**1/2 (목):**
+- DB 품질 검증 로직 추가
+- 재임베딩 준비
+
+6. 실험 계획 (1/3 - 1/12)
+**1/3-1/5 (금-일):** 실험 준비
+- AgenticRAG 평가 모드 구현 완료 확인
+- 10개 질문으로 평가 시스템 테스트
+- Ground Truth 검증 및 수정
+- 평가 데이터셋 100개로 확장 (카테고리/난이도별 분포)
+
+**1/6-1/10 (월-금):** 비교 실험 실행
+- Vanilla RAG vs Current vs Full Self-RAG 비교
+- 각 모드별 100개 질문 평가 (총 300회 실행)
+- WandB 대시보드에서 실시간 메트릭 확인
+- 주요 비교 지표:
+  - 검색 품질: Recall@3, MRR
+  - 답변 품질: Citation F1, Faithfulness
+  - 성능: 응답 시간, 토큰 사용량
+
+**1/11-1/12 (토-일):** 결과 분석 및 결정
+- WandB 집계 메트릭 분석
+- 응답 시간 vs 품질 트레이드오프 확인
+- 최종 아키텍처 결정 (Self-RAG 도입 여부)
+- 실험 결과 문서화
+
+7. 향후 방향성
+- 버퍼 메모리: 안정성 개선 완료 후 추가 예정
+- 사용자 식별: LocalStorage 기반 user_id 저장 방식 검토
+- 아키텍처: 현재 단일 도메인 특화 시스템으로 MCP 전환 불필요
+- Self-RAG/CRAG: 실험 결과에 따라 도입 결정 (1/12 이후)

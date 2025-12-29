@@ -33,6 +33,7 @@ ENV/
 # 백업
 temp_backup/
 .env.backup
+backups/
 
 # WandB
 wandb/
