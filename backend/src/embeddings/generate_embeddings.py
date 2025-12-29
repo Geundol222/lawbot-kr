@@ -202,6 +202,62 @@ def get_all_articles(mst: str, law_name: str) -> tuple[List[Dict], List[str]]:
 
         print(f"\n[INFO] {law_name}: API에서 {len(article_list)}개 조문 수신")
 
+        def flatten_text(value) -> str:
+            """조문/항/호/목 등 중첩 구조를 모두 문자열로 평탄화."""
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            if isinstance(value, list):
+                return " ".join([flatten_text(v) for v in value if v is not None])
+            if isinstance(value, dict):
+                return " ".join([flatten_text(v) for v in value.values() if v is not None])
+            return str(value)
+
+        def extract_full_content(article_dict: Dict) -> str:
+            parts: list[str] = []
+
+            # 조문 본문
+            base = flatten_text(article_dict.get("조문내용", ""))
+            if base:
+                parts.append(base)
+
+            def collect_ho(ho_obj) -> list[str]:
+                collected: list[str] = []
+                if isinstance(ho_obj, dict):
+                    ho_obj = [ho_obj]
+                if isinstance(ho_obj, list):
+                    for ho in ho_obj:
+                        ho_text = flatten_text(ho.get("호내용", ""))
+                        if ho_text:
+                            collected.append(ho_text)
+                        mok_list = ho.get("목", [])
+                        if isinstance(mok_list, dict):
+                            mok_list = [mok_list]
+                        if isinstance(mok_list, list):
+                            for mok in mok_list:
+                                mok_text = flatten_text(mok.get("목내용", ""))
+                                if mok_text:
+                                    collected.append(mok_text)
+                return collected
+
+            # 항/호/목 본문
+            hang = article_dict.get("항")
+            if isinstance(hang, dict):
+                hang = [hang]
+            if isinstance(hang, list):
+                for hang_item in hang:
+                    hang_text = flatten_text(hang_item.get("항내용", ""))
+                    if hang_text:
+                        parts.append(hang_text)
+                    parts.extend(collect_ho(hang_item.get("호", [])))
+            elif hang:
+                parts.append(flatten_text(hang))
+
+            full = " ".join(parts)
+            full = full.replace("<br/>", " ").replace("<br>", " ")
+            return " ".join(full.split())
+
         for idx, article in enumerate(article_list, 1):
             article_num = article.get('조문번호', '')
             article_title = article.get('조문제목', '')
@@ -213,88 +269,40 @@ def get_all_articles(mst: str, law_name: str) -> tuple[List[Dict], List[str]]:
                 failed_articles.append(error_msg)
                 continue
 
-            # 전문(편/장/절 제목)은 건너뛰기
-            if 조문여부 != '조문':
-                continue
+            # 조문여부가 '전문' 등으로 와도 수집 (스킵하지 않음)
+            if 조문여부 and 조문여부 != '조문':
+                print(f"[INFO] {law_name} 제{article_num}조: 조문여부={조문여부}, 수집 계속")
 
-            # 조문내용 가져오기 (API 응답에서 직접 제공)
-            조문내용 = article.get('조문내용', '')
+            full_content = extract_full_content(article)
 
-            # HTML 태그 제거
-            if isinstance(조문내용, str):
-                조문내용 = 조문내용.replace('<br/>', ' ')
-                조문내용 = 조문내용.replace('<br>', ' ')
-                full_content = 조문내용.strip()
-            elif isinstance(조문내용, list):
-                # 리스트인 경우 합치기
-                full_content = ' '.join([str(c) for c in 조문내용 if c]).strip()
-            else:
-                full_content = ''
+            if not full_content:
+                # API가 빈 문자열을 주는 경우 제목이라도 넣어서 누락을 막는다.
+                full_content = f"{article_title}".strip()
+                warn_msg = f"[WARN] {law_name} 제{article_num}조: 본문 없음 → 제목으로 대체"
+                print(warn_msg)
+                failed_articles.append(warn_msg)
 
-            # 조문내용이 제목만 있는 경우 (50자 미만) 항 내용 사용
-            # 예: "제11조(적용 범위)" 같은 제목만 있으면 항에서 본문 가져오기
-            if len(full_content) < 50:
-                항 = article.get('항')
-                content_parts = []
-
-                if isinstance(항, dict):
-                    # 항이 딕셔너리인 경우 (일반적 구조)
-                    항_content = 항.get('항내용', '')
-                    호_list = 항.get('호', [])
-
-                    if 항_content:
-                        if isinstance(항_content, str):
-                            content_parts.append(항_content)
-                        elif isinstance(항_content, list):
-                            content_parts.extend([str(c) for c in 항_content if c])
-
-                    # 호 내용 추가
-                    if isinstance(호_list, list):
-                        for 호 in 호_list:
-                            호_content = 호.get('호내용', '')
-                            if 호_content:
-                                content_parts.append(호_content)
-
-                elif isinstance(항, list):
-                    # 항이 리스트인 경우 (이전 코드 호환)
-                    for 항_item in 항:
-                        항_content = 항_item.get('항내용', '')
-                        if isinstance(항_content, list):
-                            항_content = ' '.join([str(c) for c in 항_content if c])
-                        elif not isinstance(항_content, str):
-                            항_content = str(항_content)
-
-                        if 항_content:
-                            content_parts.append(항_content)
-
-                full_content = ' '.join(content_parts).strip()
-
-            # HTML 태그 제거 (최종)
-            full_content = full_content.replace('<br/>', ' ').replace('<br>', ' ')
-
-            # 최소 길이 체크 완화 (10자 → 5자)
-            if full_content and len(full_content.strip()) > 5:
-                # ⭐ 조 단위 청킹 (청크 분할 없음) ⭐
-                # 조 전체를 하나의 청크로 저장
+            if full_content:
                 articles.append({
                     'law_name': law_name,
                     'article': f'제{article_num}조',
                     'title': article_title if isinstance(article_title, str) else '',
-                    'content': full_content,  # 조 전체 내용 (모든 항 포함)
+                    'content': full_content,
                     'mst': mst
                 })
 
-                # 성공한 조문 로그 (매 10개마다)
                 if idx % 10 == 0:
                     print(f"  [OK] {law_name}: {idx}/{len(article_list)}개 처리 중...")
             else:
-                error_msg = f"[FAIL] {law_name} 제{article_num}조: 내용 없음 또는 너무 짧음 ({len(full_content)}자)"
+                error_msg = f"[FAIL] {law_name} 제{article_num}조: 내용 없음 (0자)"
                 print(error_msg)
                 failed_articles.append(error_msg)
 
         print(f"[OK] {law_name}: {len(articles)}/{len(article_list)}개 조문 수집 완료")
         if failed_articles:
-            print(f"[WARN] {law_name}: {len(failed_articles)}개 조문 실패")
+            print(f"[WARN] {law_name}: 실패 {len(failed_articles)}개")
+            for log in failed_articles[:10]:
+                print(f"  {log}" + (" ..." if len(failed_articles) > 10 and log == failed_articles[9] else ""))
 
         return articles, failed_articles
 

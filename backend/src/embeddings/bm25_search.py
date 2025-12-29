@@ -11,6 +11,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 from typing import List, Dict
+import threading
 from rank_bm25 import BM25Okapi
 from kiwipiepy import Kiwi
 from supabase import create_client
@@ -44,6 +45,7 @@ class BM25Search:
         self.documents: List[Dict] = []  # [{'law_name': ..., 'article': ..., 'content': ...}]
         self._build_attempted = False
         self._cache_version = 2  # cache 포맷 변경 시 버전 업데이트
+        self._building = False  # 중복 빌드 방지
 
         print("[BM25] 형태소 분석기 로드 완료")
 
@@ -149,9 +151,16 @@ class BM25Search:
         if not force_rebuild and self._load_cache():
             return
 
+        # 중복 빌드 방지
+        if self._building:
+            print("[BM25] 인덱스 빌드가 이미 진행 중입니다.")
+            return
+
+        self._building = True
         self.documents = self._load_all_documents()
         if not self.documents:
             print("[BM25] ⚠️ 문서가 없습니다!")
+            self._building = False
             return
 
         print(f"[BM25] {len(self.documents)}개 문서 로드 완료")
@@ -174,6 +183,24 @@ class BM25Search:
         # 캐시 저장 (BM25 객체 대신 코퍼스만 저장해 용량/호환성 확보)
         self._save_cache(tokenized_corpus)
         print("[BM25] ✅ 인덱스 구축 완료!")
+        self._building = False
+
+    def start_background_build(self, force_rebuild: bool = False):
+        """백그라운드에서 인덱스 빌드 (요청 차단 방지)"""
+        if self.bm25 is not None and not force_rebuild:
+            return
+        if self._building:
+            return
+
+        def _worker():
+            try:
+                self.build_index(force_rebuild=force_rebuild)
+            finally:
+                self._building = False
+
+        self._building = True
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
 
     def search(self, query: str, top_k: int = 5, threshold: float = 0.0) -> List[Dict]:
         """
@@ -188,12 +215,13 @@ class BM25Search:
             검색 결과 리스트
         """
         if self.bm25 is None:
+            # 검색 시점에서는 빌드 요청만 던지고 기다리지 않음 (지연 방지)
             if not self._build_attempted:
                 self._build_attempted = True
-                print("[BM25] 인덱스가 없어 build_index()를 실행합니다...")
-                self.build_index()
+                print("[BM25] 인덱스가 없어 백그라운드 빌드를 시작합니다...")
+                self.start_background_build()
             if self.bm25 is None:
-                print("[BM25] ⚠️ 인덱스를 준비하지 못했습니다.")
+                print("[BM25] ⚠️ 인덱스를 아직 준비하지 못했습니다. BM25 검색을 건너뜁니다.")
                 return []
 
         tokenized_query = self.tokenize(query)
@@ -241,6 +269,22 @@ def get_bm25_instance():
         # 자동 인덱스 빌드는 하지 않음 (명시적으로 build_index() 호출 필요)
 
     return _bm25_instance
+
+
+def preload_bm25_index(force_rebuild: bool = False, background: bool = False):
+    """
+    서버 기동 시 BM25 인덱스를 미리 준비하기 위한 헬퍼
+
+    Args:
+        force_rebuild: 캐시 무시하고 재빌드 여부
+        background: True면 백그라운드에서 비동기 빌드, False면 동기 빌드
+    """
+    bm25 = get_bm25_instance()
+    if background:
+        bm25.start_background_build(force_rebuild=force_rebuild)
+    else:
+        bm25.build_index(force_rebuild=force_rebuild)
+    return bm25
 
 
 # 테스트용
