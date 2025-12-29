@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # 환경변수 로드 (CI 테스트 환경에서는 .env.test 우선 로드)
 if os.getenv('CI') and os.path.exists('.env.test'):
@@ -94,3 +95,37 @@ def get_llm(model: str = "flash"):
         )
 
     return _llm_instances[model]
+
+
+# LLM API 재시도 래퍼
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((Exception,)),
+    reraise=True
+)
+def llm_invoke_with_retry(llm, *args, **kwargs):
+    """
+    LLM invoke 메서드를 재시도 로직과 함께 실행
+
+    Rate Limit, Timeout 등의 에러 발생 시 최대 3회 재시도
+    - 1차 실패: 2초 대기 후 재시도
+    - 2차 실패: 4초 대기 후 재시도
+    - 3차 실패: 예외 발생
+    """
+    return llm.invoke(*args, **kwargs)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((Exception,)),
+    reraise=True
+)
+def llm_stream_with_retry(llm, *args, **kwargs):
+    """
+    LLM stream 메서드를 재시도 로직과 함께 실행
+
+    Rate Limit, Timeout 등의 에러 발생 시 최대 3회 재시도
+    """
+    return llm.stream(*args, **kwargs)
