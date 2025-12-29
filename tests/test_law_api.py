@@ -19,19 +19,19 @@ class TestFormatJoNumber:
 
     def test_format_with_je(self):
         """'제' 포함된 경우"""
-        assert format_jo_number("제56조") == "0056"
-        assert format_jo_number("제1조") == "0001"
-        assert format_jo_number("제100조") == "0100"
+        assert format_jo_number("제56조") == "005600"
+        assert format_jo_number("제1조") == "000100"
+        assert format_jo_number("제100조") == "010000"
 
     def test_format_without_je(self):
         """'제' 없는 경우"""
-        assert format_jo_number("56조") == "0056"
-        assert format_jo_number("1조") == "0001"
+        assert format_jo_number("56조") == "005600"
+        assert format_jo_number("1조") == "000100"
 
     def test_format_only_number(self):
         """숫자만 있는 경우"""
-        assert format_jo_number("56") == "0056"
-        assert format_jo_number("1") == "0001"
+        assert format_jo_number("56") == "005600"
+        assert format_jo_number("1") == "000100"
 
 
 @pytest.mark.unit
@@ -41,9 +41,14 @@ class TestExtractArticleContent:
     def test_extract_normal_content(self):
         """정상 조문 데이터"""
         law_data = {
-            "PrecEngSrch": {
-                "law": {
-                    "조문내용": "사용자는 연장근로에 대하여 통상임금의 50% 이상을 가산하여 지급하여야 한다."
+            "법령": {
+                "조문": {
+                    "조문위치": [
+                        {
+                            "조문종류명": "조문",
+                            "조문내용": "사용자는 연장근로에 대하여 통상임금의 50% 이상을 가산하여 지급하여야 한다."
+                        }
+                    ]
                 }
             }
         }
@@ -53,11 +58,13 @@ class TestExtractArticleContent:
     def test_extract_list_format(self):
         """리스트 형식 조문"""
         law_data = {
-            "PrecEngSrch": {
-                "law": [
-                    {"조문내용": "첫 번째 조문"},
-                    {"조문내용": "두 번째 조문"}
-                ]
+            "법령": {
+                "조문": {
+                    "조문위치": [
+                        {"조문종류명": "조문", "조문내용": "첫 번째 조문"},
+                        {"조문종류명": "조문", "조문내용": "두 번째 조문"}
+                    ]
+                }
             }
         }
         result = extract_article_content(law_data)
@@ -66,7 +73,7 @@ class TestExtractArticleContent:
     def test_extract_empty_data(self):
         """빈 데이터"""
         result = extract_article_content({})
-        assert "조문을 찾을 수 없습니다" in result
+        assert "조문 정보를 찾을 수 없습니다" in result
 
     def test_extract_error_response(self):
         """에러 응답"""
