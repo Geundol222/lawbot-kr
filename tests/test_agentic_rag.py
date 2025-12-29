@@ -192,7 +192,8 @@ class TestAgenticRAGUnit:
 
         assert agent.llm is not None
         assert agent.tools is not None
-        assert len(agent.tools) == 3  # 3개 도구
+        # search_vector_db, get_full_article_content, search_byeol, search_law_by_api, search_prec_by_article
+        assert len(agent.tools) == 5
         assert agent.graph is not None
 
     @patch("backend.src.agentic_rag.get_llm")

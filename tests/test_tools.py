@@ -104,7 +104,7 @@ class TestSearchLawByAPI:
 
         result = search_law_by_api.invoke({
             "law_name": "존재하지않는법",
-            "article_number": None
+            "article_number": ""
         })
 
         assert "찾을 수 없습니다" in result
@@ -118,7 +118,7 @@ class TestSearchLawByAPI:
 
         result = search_law_by_api.invoke({
             "law_name": "근로기준법",
-            "article_number": None
+            "article_number": ""
         })
 
         assert "법령 검색 실패" in result
