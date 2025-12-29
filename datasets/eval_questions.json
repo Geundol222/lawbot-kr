@@ -1,0 +1,62 @@
+[
+  {
+    "id": "q001",
+    "question": "민법 제750조가 뭐야?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q002",
+    "question": "야근수당은 얼마나 받을 수 있어?",
+    "category": "situation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q003",
+    "question": "회사가 야근수당을 안 주는데 어떻게 해야 해?",
+    "category": "situation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q004",
+    "question": "근로기준법 제56조 연장근로 가산수당이 어떻게 돼?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q005",
+    "question": "월세 계약을 중도 해지하고 싶은데 보증금을 돌려받을 수 있어?",
+    "category": "situation",
+    "difficulty": "hard"
+  },
+  {
+    "id": "q006",
+    "question": "교통사고로 다쳤을 때 보상은 어떻게 받아?",
+    "category": "situation",
+    "difficulty": "hard"
+  },
+  {
+    "id": "q007",
+    "question": "형법 제250조는 무슨 내용이야?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q008",
+    "question": "헌법 제1조 1항이 뭐야?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q009",
+    "question": "근로기준법 별표 1에서 정한 업종은 뭐야?",
+    "category": "specific_article",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q010",
+    "question": "부당해고를 당했을 때 어떻게 대응해야 해?",
+    "category": "situation",
+    "difficulty": "hard"
+  }
+]
