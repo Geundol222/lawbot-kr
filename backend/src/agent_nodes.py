@@ -44,7 +44,7 @@ class AgentNodes:
         if not has_human:
             messages.append(HumanMessage(content=state.get("question", "")))
 
-        # LLM이 도구 선택!
+        # LLM이 도구 선택
         print("🤖 LLM 호출 중 (도구 선택)...")
         llm_start = time.time()
         response = self.llm_with_tools.invoke(messages)
@@ -53,6 +53,26 @@ class AgentNodes:
 
         tool_calls_count = state.get("tool_calls", 0)
         if getattr(response, "tool_calls", None):
+            # 벡터 결과가 있으면 search_law_by_api 호출은 제거
+            has_vector_hits = False
+            try:
+                from src.agentic_rag import vector_search_instance
+                has_vector_hits = bool(getattr(vector_search_instance, "last_results", []))
+            except Exception:
+                has_vector_hits = False
+
+            filtered_calls = []
+            for call in response.tool_calls:
+                if has_vector_hits and call.get("name") == "search_law_by_api":
+                    print("ℹ️ 벡터 결과 존재 → search_law_by_api 호출 제거")
+                    continue
+                if state.get("exceptions_checked") and call.get("name") == "check_exceptions_needed":
+                    print("ℹ️ check_exceptions_needed 이미 실행 → 반복 호출 제거")
+                    continue
+                filtered_calls.append(call)
+
+            response.tool_calls = filtered_calls
+
             # 도구 호출 개수만큼 카운트 증가
             num_calls = len(response.tool_calls)
             tool_calls_count += num_calls
@@ -66,12 +86,15 @@ class AgentNodes:
             "messages": messages + [response],
             "question": state.get("question", ""),
             "tool_calls": tool_calls_count,
+            "exceptions_checked": state.get("exceptions_checked", False),
         }
 
     def execute_tools(self, state: AgentState) -> AgentState:
         """도구 실행 (ToolNode 대체) - 병렬 처리"""
         messages = state['messages']
         last_message = messages[-1]
+        exceptions_checked = state.get("exceptions_checked", False)
+        exceptions_flag = [exceptions_checked]
 
         # 도구 호출 실행
         tool_messages = []
@@ -101,6 +124,8 @@ class AgentNodes:
                                 content=result_str,
                                 tool_call_id=tool_id
                             )
+                            if tool_name == "check_exceptions_needed":
+                                exceptions_flag[0] = True
                         except Exception as e:
                             success = False
                             result_str = f"도구 실행 오류: {str(e)}"
@@ -137,16 +162,26 @@ class AgentNodes:
                 if result:
                     tool_messages = [result]
 
+            # check_exceptions_needed 실행 여부 반영
+            exceptions_checked = exceptions_flag[0]
+
         return {
             "messages": messages + tool_messages,
             "question": state.get("question", ""),
             "tool_calls": state.get("tool_calls", 0),
+            "exceptions_checked": exceptions_checked,
         }
 
     def should_continue(self, state: AgentState) -> str:
         """도구 실행 필요 여부 판단"""
         messages = state['messages']
         last_message = messages[-1]
+
+        # search_law_by_api가 SKIP_API를 반환한 경우 즉시 종료
+        if getattr(last_message, "type", "") == "tool":
+            content = getattr(last_message, "content", "") or ""
+            if isinstance(content, str) and content.startswith("SKIP_API"):
+                return "end"
 
         # 무한 루프 방지 안전장치: 최대 10회 (매우 여유있게 설정)
         if state.get("tool_calls", 0) >= 10:
@@ -155,6 +190,14 @@ class AgentNodes:
 
         # ⭐ Function Calling 확인 ⭐
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            # 벡터 검색이 성공했다면 search_law_by_api 반복 호출 차단
+            from src.agentic_rag import vector_search_instance
+            has_vector_hits = bool(getattr(vector_search_instance, "last_results", []))
+            if has_vector_hits:
+                for call in last_message.tool_calls:
+                    if call.get("name") == "search_law_by_api":
+                        print("ℹ️ 벡터 결과 이미 존재 → search_law_by_api 호출 스킵, 그래프 종료")
+                        return "end"
             return "continue"
 
         return "end"

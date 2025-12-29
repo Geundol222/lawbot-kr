@@ -10,3 +10,4 @@ class AgentState(TypedDict):
     messages: Annotated[List, "messages"]
     question: str
     tool_calls: int  # 방어용: 무한 반복 방지
+    exceptions_checked: bool  # check_exceptions_needed 실행 여부 플래그
