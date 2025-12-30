@@ -16,8 +16,15 @@ class VectorSearch:
         self.model = SentenceTransformer("intfloat/multilingual-e5-large-instruct")
         # reranker (Korean BGE)
         self.reranker = CrossEncoder("dragonkue/bge-reranker-v2-m3-ko")
-        # create_client는 (url, key) 순서를 사용
-        self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # create_client는 (url, key) 순서를 사용 (타임아웃 30초)
+        self.supabase = create_client(
+            SUPABASE_URL,
+            SUPABASE_KEY,
+            options={
+                "postgrest_client_timeout": 30,
+                "storage_client_timeout": 30,
+            }
+        )
         # 마지막 검색 결과를 보관해 후속 로깅/저장에 활용
         self.last_results = []
         # BM25 인스턴스 (필요 시 lazy build)
