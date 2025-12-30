@@ -166,23 +166,26 @@ class OfflineEvaluator:
             print(f"  [재현성 모드] Ground Truth의 고정된 검색 결과 사용 ({len(ground_truth['retrieved_docs'])}개)")
             retrieved_docs = ground_truth["retrieved_docs"]
 
-            # TODO: AgenticRAG.run_with_fixed_context() 구현 필요
-            # 현재는 일반 run() 사용
-            answer = self.agent.run(question)
+            # TODO: AgenticRAG.run_with_fixed_context() 구현 필요 (추후)
+            # 현재는 일반 run_with_metrics() 사용 (실시간 검색)
+            result = self.agent.run_with_metrics(question)
+            answer = result["answer"]
+            # retrieved_docs는 GT 것을 사용 (재현성 위해)
 
         else:
             # Ground Truth에 retrieved_docs 없으면 실제 검색 수행
-            print(f"  [일반 모드] 실시간 검색 수행")
+            print(f"  [일반 모드] 실시간 검색 수행 (mode: {self.mode})")
 
-            # TODO: AgenticRAG.run_with_metrics() 구현 필요
-            answer = self.agent.run(question)
-            retrieved_docs = []  # 임시
+            # run_with_metrics() 사용
+            result = self.agent.run_with_metrics(question)
+            answer = result["answer"]
+            retrieved_docs = result["retrieved_docs"]
 
-        metrics = {
-            "total_tokens": 0,  # TODO: 실제 토큰 수 추적
-            "api_calls": 0,      # TODO: 실제 API 호출 수 추적
-            "search_iterations": 1  # TODO: 실제 검색 반복 수 추적
-        }
+        metrics = result.get("metrics", {
+            "total_tokens": 0,
+            "api_calls": 0,
+            "search_iterations": 1
+        })
 
         return answer, retrieved_docs, metrics
 

@@ -580,14 +580,19 @@ def search_law_by_api(law_name: str, query: str = "", article_number: str = None
 # ========================================
 
 class AgenticRAG:
-    def __init__(self, session_id: Optional[str] = None):
+    def __init__(self, session_id: Optional[str] = None, mode: str = "current"):
         """
         AgenticRAG 초기화
 
         Args:
             session_id: 세션 ID (프론트엔드에서 전달, WandB 로깅용)
+            mode: 평가 모드 ("vanilla", "current", "self_rag")
+                - vanilla: 벡터 검색 1회만, 예외 조항 체크 X
+                - current: 현재 시스템 (예외 조항 체크)
+                - self_rag: Self-RAG (검색 → 평가 → 재검색)
         """
         self.session_id = session_id
+        self.mode = mode
 
         # 단일 LLM 사용 (Gemini 2.5 Flash)
         self.llm = get_llm("flash")
@@ -666,3 +671,300 @@ class AgenticRAG:
     def run_stream(self, question: str, session_id: Optional[str] = None):
         """Agent 실행 (streaming)"""
         return self.streaming.run_stream(question, session_id)
+
+    # ========================================
+    # 평가용 인터페이스
+    # ========================================
+
+    def run_with_metrics(self, question: str):
+        """
+        평가용 메서드: 답변, 검색 문서, 메트릭 반환
+
+        Args:
+            question: 사용자 질문
+
+        Returns:
+            {
+                "answer": str,  # 최종 답변
+                "retrieved_docs": List[Dict],  # 검색된 문서들
+                "metrics": {
+                    "response_time_ms": int,
+                    "total_tokens": int,
+                    "api_calls": int,
+                    "search_iterations": int,
+                    "mode": str
+                }
+            }
+        """
+        import time
+        start_time = time.time()
+
+        # 메트릭 추적 변수
+        api_calls = 0
+        total_tokens = 0
+        retrieved_docs = []
+
+        # 모드별 실행
+        if self.mode == "vanilla":
+            answer, docs, tokens, calls = self._run_vanilla(question)
+        elif self.mode == "self_rag":
+            answer, docs, tokens, calls = self._run_self_rag(question)
+        else:  # current (기본)
+            answer, docs, tokens, calls = self._run_current(question)
+
+        retrieved_docs = docs
+        total_tokens = tokens
+        api_calls = calls
+
+        response_time_ms = int((time.time() - start_time) * 1000)
+
+        return {
+            "answer": answer,
+            "retrieved_docs": retrieved_docs,
+            "metrics": {
+                "response_time_ms": response_time_ms,
+                "total_tokens": total_tokens,
+                "api_calls": api_calls,
+                "search_iterations": len(retrieved_docs) // 5 if retrieved_docs else 1,
+                "mode": self.mode
+            }
+        }
+
+    def _run_vanilla(self, question: str):
+        """
+        Vanilla RAG 실행 (검색 1회, 예외 조항 체크 X)
+
+        Returns:
+            (answer, retrieved_docs, total_tokens, api_calls)
+        """
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        # 벡터 검색 1회만
+        search_result = search_vector_db.invoke({"query": question})
+
+        # 검색 실패 시 API 검색 (최소한의 fallback)
+        if "VECTOR_DB_NO_MATCH" in search_result:
+            # 질문에서 법령명 추출 시도
+            law_name = self._extract_law_name(question)
+            if law_name:
+                search_result = search_law_by_api.invoke({
+                    "law_name": law_name,
+                    "query": question
+                })
+            else:
+                search_result = "검색 실패: 법령명을 찾을 수 없습니다."
+
+        # retrieved_docs 파싱
+        retrieved_docs = self._parse_retrieved_docs(search_result)
+
+        # 답변 생성 (검색 결과 기반)
+        messages = [
+            SystemMessage(content="""당신은 한국 법령 전문가입니다.
+검색된 법령 내용을 기반으로 정확하고 간결하게 답변하세요.
+
+필수 형식:
+1. 결론 (1-2문장)
+2. 근거 법령 (법령명 조문, 리스트)
+3. 법령 내용 (원문 인용)
+
+근거 법령을 반드시 명시하세요."""),
+            HumanMessage(content=f"질문: {question}\n\n검색 결과:\n{search_result}")
+        ]
+
+        response = self.llm.invoke(messages)
+        answer = self._extract_answer_text(response)
+
+        # 메트릭
+        total_tokens = self._count_tokens(messages, response)
+        api_calls = 2  # search + generate
+
+        return answer, retrieved_docs, total_tokens, api_calls
+
+    def _run_current(self, question: str):
+        """
+        Current 시스템 실행 (예외 조항 체크)
+
+        Returns:
+            (answer, retrieved_docs, total_tokens, api_calls)
+        """
+        # 기존 그래프 실행 (스트리밍 모드)
+        answer = ""
+        for chunk in self.run_stream(question):
+            # SSE 이벤트에서 answer_chunk만 추출
+            if "data: " in chunk:
+                import json
+                try:
+                    event_data = json.loads(chunk.split("data: ")[1])
+                    if event_data.get("type") == "answer_chunk":
+                        answer += event_data.get("text", "")
+                except:
+                    pass
+
+        # 검색 결과 (vector_search_instance.last_results)
+        retrieved_docs = self._get_last_search_results()
+
+        # 메트릭 (대략적)
+        total_tokens = len(answer) * 2  # 대략적 추정
+        api_calls = 3  # search + check_exceptions + generate
+
+        return answer, retrieved_docs, total_tokens, api_calls
+
+    def _run_self_rag(self, question: str):
+        """
+        Self-RAG 실행 (검색 → 평가 → 재검색, 최대 3회)
+
+        Returns:
+            (answer, retrieved_docs, total_tokens, api_calls)
+        """
+        from langchain_core.messages import SystemMessage, HumanMessage
+        import json
+
+        max_iterations = 3
+        all_retrieved_docs = []
+        total_tokens = 0
+        api_calls = 0
+
+        # 초기 검색
+        search_result = search_vector_db.invoke({"query": question})
+        api_calls += 1
+        retrieved_docs = self._parse_retrieved_docs(search_result)
+        all_retrieved_docs.extend(retrieved_docs)
+
+        for iteration in range(max_iterations):
+            # LLM이 검색 결과를 평가
+            eval_prompt = f"""검색 결과가 질문에 답하기에 충분한지 평가하세요.
+
+질문: {question}
+
+검색 결과:
+{search_result}
+
+평가 기준:
+1. 질문의 핵심 조건이 모두 포함되었나?
+2. 예외 조항이 필요한가?
+3. 참조된 다른 조문이 있나?
+
+응답 (JSON):
+{{
+  "sufficient": true/false,
+  "reason": "이유",
+  "additional_search": "추가 검색할 내용" (불충분할 경우)
+}}"""
+
+            eval_response = self.llm.invoke([HumanMessage(content=eval_prompt)])
+            api_calls += 1
+
+            eval_text = self._extract_answer_text(eval_response)
+
+            # JSON 파싱
+            try:
+                if "```json" in eval_text:
+                    eval_text = eval_text.split("```json")[1].split("```")[0].strip()
+                eval_result = json.loads(eval_text)
+            except:
+                eval_result = {"sufficient": True, "reason": "파싱 실패"}
+
+            # 충분하면 종료
+            if eval_result.get("sufficient", True):
+                break
+
+            # 추가 검색
+            additional_query = eval_result.get("additional_search", "")
+            if additional_query:
+                print(f"🔁 Self-RAG 반복 {iteration+1}: {additional_query}")
+                search_result = search_vector_db.invoke({"query": additional_query})
+                api_calls += 1
+                retrieved_docs = self._parse_retrieved_docs(search_result)
+                all_retrieved_docs.extend(retrieved_docs)
+
+        # 최종 답변 생성
+        all_content = "\n\n".join([doc.get("content", "") for doc in all_retrieved_docs])
+        messages = [
+            SystemMessage(content="""당신은 한국 법령 전문가입니다.
+검색된 법령 내용을 기반으로 정확하고 간결하게 답변하세요.
+
+필수 형식:
+1. 결론 (1-2문장)
+2. 근거 법령 (법령명 조문, 리스트)
+3. 법령 내용 (원문 인용)"""),
+            HumanMessage(content=f"질문: {question}\n\n검색 결과:\n{all_content}")
+        ]
+
+        response = self.llm.invoke(messages)
+        api_calls += 1
+        answer = self._extract_answer_text(response)
+
+        total_tokens = self._count_tokens(messages, response)
+
+        return answer, all_retrieved_docs, total_tokens, api_calls
+
+    # ========================================
+    # 헬퍼 메서드
+    # ========================================
+
+    def _extract_law_name(self, question: str):
+        """질문에서 법령명 추출"""
+        import re
+        # 간단한 패턴 매칭 (예: "민법", "근로기준법")
+        patterns = [
+            r'(민법|형법|상법|헌법)',
+            r'(근로기준법|노동조합법|산업안전보건법)',
+            r'(임대차보호법|주택임대차보호법)',
+            r'(\w+법)'
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, question)
+            if match:
+                return match.group(1)
+        return None
+
+    def _parse_retrieved_docs(self, search_result: str):
+        """검색 결과 문자열을 문서 리스트로 파싱"""
+        docs = []
+        if "VECTOR_DB_NO_MATCH" in search_result or "검색 실패" in search_result:
+            return docs
+
+        # 간단한 파싱 (실제로는 더 정교하게)
+        import re
+        matches = re.findall(r'법령: (.+?)\n조문: (.+?)\n유사도: (.+?)\n내용: (.+?)(?:\n\n|\n관련|\Z)',
+                            search_result, re.DOTALL)
+
+        for law_name, article, similarity, content in matches:
+            docs.append({
+                "law_name": law_name.strip(),
+                "article": article.strip(),
+                "similarity": float(similarity.strip()) if similarity.strip() else 0.0,
+                "content": content.strip()
+            })
+
+        return docs
+
+    def _get_last_search_results(self):
+        """마지막 검색 결과 가져오기"""
+        if hasattr(vector_search_instance, 'last_results') and vector_search_instance.last_results:
+            return vector_search_instance.last_results
+        return []
+
+    def _extract_answer_text(self, response):
+        """LLM 응답에서 텍스트 추출"""
+        if hasattr(response, 'content'):
+            content = response.content
+            if isinstance(content, list):
+                text = ""
+                for part in content:
+                    if isinstance(part, dict) and 'text' in part:
+                        text += part['text']
+                return text
+            elif isinstance(content, str):
+                return content
+        return str(response)
+
+    def _count_tokens(self, messages, response):
+        """토큰 수 대략 계산"""
+        total_text = ""
+        for msg in messages:
+            total_text += msg.content if hasattr(msg, 'content') else str(msg)
+        total_text += self._extract_answer_text(response)
+
+        # 대략적 토큰 수 (한국어: 1토큰 ≈ 2자)
+        return len(total_text) // 2
