@@ -940,9 +940,13 @@ class AgenticRAG:
         return docs
 
     def _get_last_search_results(self):
-        """마지막 검색 결과 가져오기"""
-        if hasattr(vector_search_instance, 'last_results') and vector_search_instance.last_results:
-            return vector_search_instance.last_results
+        """마지막 검색 결과 가져오기 (스레드 안전)"""
+        if hasattr(vector_search_instance, 'last_results'):
+            if hasattr(vector_search_instance, '_results_lock'):
+                with vector_search_instance._results_lock:
+                    return vector_search_instance.last_results.copy()
+            else:
+                return vector_search_instance.last_results
         return []
 
     def _extract_answer_text(self, response):
