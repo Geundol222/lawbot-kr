@@ -2,6 +2,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from supabase import create_client
 import numpy as np
 import time
+import threading
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,8 +26,9 @@ class VectorSearch:
                 "storage_client_timeout": 30,
             }
         )
-        # 마지막 검색 결과를 보관해 후속 로깅/저장에 활용
+        # 마지막 검색 결과를 보관해 후속 로깅/저장에 활용 (멀티스레드 안전)
         self.last_results = []
+        self._results_lock = threading.Lock()
         # BM25 인스턴스 (필요 시 lazy build)
         self.bm25 = get_bm25_instance()
 
@@ -90,7 +92,9 @@ class VectorSearch:
     def search(self, query: str, top_k: int = 5, threshold: float = 0.0):
         """유사한 법령 검색 (하위 쿼리 병렬: Semantic+BM25 → 전체 rerank)"""
         search_start = time.time()
-        self.last_results = []
+
+        with self._results_lock:
+            self.last_results = []
 
         subqueries = self._extract_subqueries(query)
         print(f"[DEBUG] 서브쿼리 {len(subqueries)}개: {subqueries}")
@@ -157,7 +161,8 @@ class VectorSearch:
                 deduplication_count=0
             )
 
-        self.last_results = final
+        with self._results_lock:
+            self.last_results = final
         return final
 
     def _bm25_search_safe(self, query: str, top_k: int) -> List[Dict]:
