@@ -18,10 +18,9 @@ from .evaluation_metrics import (
     EvaluationResult,
     ExperimentLogger
 )
-from .evaluator import (
-    OfflineEvaluator,
-    run_comparison_experiment
-)
+
+# evaluator는 lazy import (순환 import 방지)
+# from .evaluator import OfflineEvaluator, run_comparison_experiment
 
 __all__ = [
     # 운영 모니터링
@@ -37,7 +36,7 @@ __all__ = [
     "EvaluationResult",
     "ExperimentLogger",
 
-    # 오프라인 평가
-    "OfflineEvaluator",
-    "run_comparison_experiment"
+    # 오프라인 평가 (lazy import 필요)
+    # "OfflineEvaluator",
+    # "run_comparison_experiment"
 ]

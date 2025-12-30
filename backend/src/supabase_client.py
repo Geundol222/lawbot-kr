@@ -1,6 +1,15 @@
 import os
+import sys
 from uuid import UUID, uuid4
 from supabase import create_client, Client
+
+# Windows console encoding fix
+if sys.platform == "win32":
+    import io
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from src.config import SUPABASE_KEY, SUPABASE_URL
 
