@@ -267,6 +267,30 @@ class AgentStreaming:
             print(f"\n🔍 [DEBUG] 총 {chunk_count}개 청크 수신")
             print(f"📝 답변 스트리밍 완료: {len(full_answer)}자")
 
+            # 답변 완료 이벤트 - 법령 출처 포함
+            law_references = []
+            if vector_search_instance.last_results:
+                # 검색 결과에서 법령 출처 수집 (중복 제거)
+                seen = set()
+                for result in vector_search_instance.last_results[:5]:  # 상위 5개만
+                    law_name = result.get("law_name")
+                    article = result.get("article")
+                    if law_name and article:
+                        key = f"{law_name}:{article}"
+                        if key not in seen:
+                            law_references.append({
+                                "law_name": law_name,
+                                "article": article
+                            })
+                            seen.add(key)
+
+            if law_references:
+                complete_event = json.dumps({
+                    "type": "answer_complete",
+                    "law_references": law_references
+                }, ensure_ascii=False)
+                yield f"data: {complete_event}\n\n"
+
         except Exception as e:
             import traceback
             error_msg = f"❌ 오류 발생: {str(e)}"
