@@ -38,11 +38,19 @@ export async function chatAPI(request: ChatRequest): Promise<ChatResponse> {
 }
 
 export interface SSEEvent {
-  type: 'searching' | 'checking_exceptions' | 'answer_start' | 'answer_chunk' | 'error';
+  type: 'searching' | 'checking_exceptions' | 'answer_start' | 'answer_chunk' | 'answer_complete' | 'error';
   message?: string;
   text?: string;
   articles?: string[];
   reason?: string;
+  law_references?: Array<{ law_name: string; article: string }>;
+}
+
+export interface FeedbackRequest {
+  session_id: string;
+  message_index: number;
+  feedback_type: 'positive' | 'negative';
+  message_content: string;
 }
 
 /**
@@ -53,7 +61,7 @@ export async function chatStreamAPI(
   onSearching?: () => void,
   onCheckingExceptions?: (articles: string[], reason: string) => void,
   onAnswerChunk?: (chunk: string) => void,
-  onDone?: () => void,
+  onDone?: (lawReferences?: Array<{ law_name: string; article: string }>) => void,
   onError?: (error: string) => void
 ): Promise<void> {
   try {
@@ -76,12 +84,13 @@ export async function chatStreamAPI(
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let lawReferences: Array<{ law_name: string; article: string }> | undefined;
 
     while (true) {
       const { done, value } = await reader.read();
 
       if (done) {
-        onDone?.();
+        onDone?.(lawReferences);
         break;
       }
 
@@ -119,6 +128,13 @@ export async function chatStreamAPI(
                 }
                 break;
 
+              case 'answer_complete':
+                // 답변 완료 시 법령 출처 저장
+                if (event.law_references) {
+                  lawReferences = event.law_references;
+                }
+                break;
+
               case 'error':
                 onError?.(event.message || 'Unknown error');
                 return;
@@ -131,6 +147,23 @@ export async function chatStreamAPI(
     }
   } catch (error) {
     onError?.(error instanceof Error ? error.message : 'Unknown error');
+  }
+}
+
+/**
+ * 사용자 피드백 전송
+ */
+export async function submitFeedback(feedback: FeedbackRequest): Promise<void> {
+  const response = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(feedback),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Feedback submission failed: ${response.status}`);
   }
 }
 
