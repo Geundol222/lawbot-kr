@@ -53,3 +53,6 @@ frontend/build/
 frontend/.env*.local
 .vercel
 .env*.local
+
+# 면접 준비 자료 (개인용)
+INTERVIEW_GUIDE.md
