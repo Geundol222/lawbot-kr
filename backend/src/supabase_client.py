@@ -19,22 +19,8 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 print(f"✅ Supabase URL: {'설정됨' if SUPABASE_URL else '없음'}")
 print(f"✅ Supabase KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
 
-# Supabase 클라이언트 생성 (타임아웃 설정)
-supabase: Client = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY,
-    options={
-        "schema": "public",
-        "headers": {"x-client-info": "lawbot-kr"},
-        "auto_refresh_token": True,
-        "persist_session": True,
-        "detect_session_in_url": False,
-        # PostgrestClient 타임아웃 설정 (30초)
-        "postgrest_client_timeout": 30,
-        # Storage 타임아웃 설정 (30초)
-        "storage_client_timeout": 30,
-    }
-)
+# Supabase 클라이언트 생성 (타임아웃 30초)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def _normalize_session_id(session_id: str) -> str:
