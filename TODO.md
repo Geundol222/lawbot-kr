@@ -255,13 +255,21 @@
   - Windows 콘솔 인코딩 이슈 해결 (cp949 → utf-8)
 
 **12/30 (월):**
-- AgenticRAG 평가 모드 구현 (mode 파라미터 추가)
-- run_with_metrics() 메서드 추가 (retrieved_docs, metrics 반환)
-- Supabase 타임아웃 설정
+- ✅ AgenticRAG 평가 모드 구현 (mode 파라미터 추가)
+  - vanilla, current, self_rag 모드 구현
+  - run_with_metrics() 메서드 추가 (retrieved_docs, metrics 반환)
+- ⏸️ Supabase 타임아웃 설정 (SDK 미지원으로 보류)
 
 **12/31 (화):**
-- 멀티스레드 안전성 강화 (threading.Lock)
-- 스트리밍 에러 핸들링
+- ✅ 멀티스레드 안전성 강화 (threading.Lock)
+  - vector_search.py에 _results_lock 추가
+  - agentic_rag.py의 _get_last_search_results() 스레드 안전 처리
+- ⏸️ 스트리밍 에러 핸들링 (복잡도 대비 가치 낮아 보류)
+- ✅ **예외 케이스 집중 실험 완료**
+  - 5개 질문 (q011~q015) × 3개 모드 (vanilla, current, self_rag)
+  - 실험 결과: Current 모드 100% 정확도, Self-RAG 80% 정확도
+  - **결론: Current 모드 채택, Self-RAG 서비스 배포 제외**
+  - 문서화: docs/EXPERIMENT_RESULTS.md
 
 **1/1 (수):**
 - 휴식
@@ -270,30 +278,31 @@
 - DB 품질 검증 로직 추가
 - 재임베딩 준비
 
-6. 실험 계획 (1/3 - 1/12)
-**1/3-1/5 (금-일):** 실험 준비
-- AgenticRAG 평가 모드 구현 완료 확인
-- 10개 질문으로 평가 시스템 테스트
-- Ground Truth 검증 및 수정
-- 평가 데이터셋 100개로 확장 (카테고리/난이도별 분포)
+6. ✅ 실험 결과 (12/31 완료)
 
-**1/6-1/10 (월-금):** 비교 실험 실행
-- Vanilla RAG vs Current vs Full Self-RAG 비교
-- 각 모드별 100개 질문 평가 (총 300회 실행)
-- WandB 대시보드에서 실시간 메트릭 확인
-- 주요 비교 지표:
-  - 검색 품질: Recall@3, MRR
-  - 답변 품질: Citation F1, Faithfulness
-  - 성능: 응답 시간, 토큰 사용량
+**실험 요약**:
+- 5개 예외 케이스 질문으로 Vanilla, Current, Self-RAG 비교
+- **결론**: Current 모드 채택 결정
 
-**1/11-1/12 (토-일):** 결과 분석 및 결정
-- WandB 집계 메트릭 분석
-- 응답 시간 vs 품질 트레이드오프 확인
-- 최종 아키텍처 결정 (Self-RAG 도입 여부)
-- 실험 결과 문서화
+**실험 결과**:
+| 모드 | 평균 응답시간 | 정확률 | 비고 |
+|------|--------------|--------|------|
+| Vanilla | 14.4초 | 80% (4/5) | 빠르지만 예외 조항 놓침 |
+| **Current** | **22.5초** | **100% (5/5)** | ✅ **최적 균형** |
+| Self-RAG | 80.7초 | 80% (4/5) | 느리고 오답 발생 |
+
+**핵심 발견**:
+- Self-RAG는 법률 도메인에서 오히려 혼란 야기 (Q011: 제11조 과신으로 완전 반대 답변)
+- Current 모드의 check_exceptions_needed 휴리스틱이 LLM 평가보다 안정적
+- 문서: docs/EXPERIMENT_RESULTS.md
+
+**향후 계획**:
+- Self-RAG 코드는 포트폴리오/논문용으로 보존
+- 서비스는 Current 모드로 배포
 
 7. 향후 방향성
+- ✅ 최종 아키텍처: Current 모드 (예외 조항 체크) 확정
+- ❌ Self-RAG/CRAG: 법률 도메인에서 비효율적, 서비스 배포 제외
 - 버퍼 메모리: 안정성 개선 완료 후 추가 예정
 - 사용자 식별: LocalStorage 기반 user_id 저장 방식 검토
 - 아키텍처: 현재 단일 도메인 특화 시스템으로 MCP 전환 불필요
-- Self-RAG/CRAG: 실험 결과에 따라 도입 결정 (1/12 이후)
