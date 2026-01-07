@@ -337,3 +337,63 @@
 - [ ] 실시간 통계 연동 (Supabase)
 - [ ] 접근성 개선 (ARIA, 키보드 네비게이션)
 - [ ] 성능 최적화 (React.memo)
+
+---
+
+## 2025.01.07
+1. ✅ Buffer Memory 프롬프트 엔지니어링
+- 문제: Memory 저장/로드는 되지만 LLM이 이전 내용 반복 설명
+- 해결: agent_streaming.py + agentic_rag.py 프롬프트 수정
+  - "이미 설명한 내용은 반복하지 마세요. 새로운 질문에만 집중하세요."
+  - 구체적 예시 추가 (야근수당/주휴수당 케이스)
+- 효과: 연속 대화 시 간결한 답변 기대
+
+2. ✅ 포트폴리오 문서 개선
+- portfolio_guide.md 전면 개편
+- 변경: 전문가스러운 표현 → 5개월 신입이 실제로 말할 수 있는 수준
+- 추가 섹션:
+  - 기술 용어 쉽게 설명하기 (RAG, Hybrid Search 등)
+  - 절대 하지 말아야 할 실수 (과장, 거짓)
+  - 면접 전날 체크리스트
+  - 마지막 조언 (모르면 모른다고 하기)
+
+3. ✅ .gitignore 정리
+- 개인 면접 준비 문서 추가:
+  - docs/portfolio_guide.md
+  - docs/evaluation_results.md
+  - docs/search_quality_improvement_plan.md
+  - docs/buffer_memory.md
+- 테스트 파일 추가: test_*.py, run_*.py
+- 로그 파일 추가: *.log, DEBUG/
+- 이유: 공개하면 오히려 역효과 (한계 노출, 면접 답변 스크립트)
+
+4. ✅ 불필요한 파일 정리
+- 삭제한 파일:
+  - 모든 *.log 파일 (6개 평가 로그 포함)
+  - 모든 __pycache__ 디렉토리
+  - 모든 *.pyc 파일
+  - run_evaluation.py, test_evaluation_modes.py
+  - DEBUG/ 디렉토리 (벡터 DB 재구축 로그)
+- 남겨야 할 파일:
+  - test_buffer_memory.py는 삭제 예정 (.gitignore 추가됨)
+
+5. 📝 TODO.md 업데이트
+- 기존 기록 전체 보존 (개발 과정 역사)
+- 이 섹션 추가 (1/7 작업 내용)
+
+---
+
+## 📊 프로젝트 최종 현황 (2025.01.07)
+
+### 완료된 주요 기능
+- ✅ Agentic RAG (Current 모드, 정확도 100%)
+- ✅ Buffer Memory (프롬프트 엔지니어링 완료)
+- ✅ 정량 평가 시스템 (Recall@5: 70%)
+- ✅ 프론트엔드 P0 개선 (에러 처리, 피드백, 법령 출처)
+- ✅ 포트폴리오 문서화 (면접 가이드 포함)
+
+### 포트폴리오 제출 준비 완료
+- ✅ README 최적화
+- ✅ 아키텍처 문서 (docs/architecture.md)
+- ✅ .gitignore 정리 (개인 문서 비공개)
+- ⏸️ 배포 (선택 사항)
