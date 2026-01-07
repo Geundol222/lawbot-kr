@@ -123,7 +123,7 @@ class OfflineEvaluator:
 
                 results.append(eval_result)
 
-                print(f"✅ {question_id}: Recall@3={eval_result.recall_at_3:.2f}, F1={eval_result.citation_f1:.2f}")
+                print(f"✅ {question_id}: Recall@3={eval_result.recall_at_3:.2f}, Recall@5={eval_result.recall_at_5:.2f}, Recall@10={eval_result.recall_at_10:.2f}, F1={eval_result.citation_f1:.2f}")
 
             except Exception as e:
                 print(f"❌ {question_id} 실패: {e}")

@@ -24,7 +24,15 @@ from src.monitoring import get_wandb_logger, AgenticRAGLogger
 from src.agent_state import AgentState
 from src.agent_nodes import AgentNodes
 from src.agent_streaming import AgentStreaming
+from src.memory import create_conversation_memory
+from src.supabase_client import supabase
 
+
+# ========================================
+# 평가 모드 설정 (평가 시 top_k 증가용)
+# ========================================
+EVALUATION_MODE = False  # 평가 시 True로 설정
+EVAL_TOP_K = 10  # 평가 시 검색 개수
 
 # ========================================
 # 임베딩 모델 싱글톤 - 앱 시작 시 미리 로드
@@ -92,8 +100,11 @@ def search_vector_db(query: str) -> str:
 
     중요: 이 도구가 성공하면 조문 내용이 포함되므로 추가 도구 호출 불필요!
     """
+    # 평가 모드에 따라 top_k 결정
+    top_k = EVAL_TOP_K if EVALUATION_MODE else 5
+
     # 1차 검색: 원본 쿼리
-    results = vector_search_instance.search(query, top_k=5, threshold=0.7)
+    results = vector_search_instance.search(query, top_k=top_k, threshold=0.7)
 
     # 1차 실패 시: Query Expansion (핵심 법률 용어만 추출해서 재검색)
     if not results:
@@ -125,7 +136,7 @@ def search_vector_db(query: str) -> str:
             # 추출된 핵심 용어가 원본과 다르면 재검색
             if core_term and len(core_term) > 2 and core_term != query:
                 print(f"🔍 Query Expansion: '{query}' → '{core_term}'")
-                results = vector_search_instance.search(core_term, top_k=5, threshold=0.7)
+                results = vector_search_instance.search(core_term, top_k=top_k, threshold=0.7)
         except Exception as e:
             print(f"⚠️ Query Expansion 실패: {e}")
 
@@ -580,7 +591,7 @@ def search_law_by_api(law_name: str, query: str = "", article_number: str = None
 # ========================================
 
 class AgenticRAG:
-    def __init__(self, session_id: Optional[str] = None, mode: str = "current"):
+    def __init__(self, session_id: Optional[str] = None, mode: str = "current", use_memory: bool = True):
         """
         AgenticRAG 초기화
 
@@ -590,9 +601,22 @@ class AgenticRAG:
                 - vanilla: 벡터 검색 1회만, 예외 조항 체크 X
                 - current: 현재 시스템 (예외 조항 체크)
                 - self_rag: Self-RAG (검색 → 평가 → 재검색)
+            use_memory: 대화 이력 메모리 사용 여부 (기본 True)
         """
-        self.session_id = session_id
+        self.session_id = session_id or str(__import__('uuid').uuid4())
         self.mode = mode
+        self.use_memory = use_memory
+
+        # 대화 메모리 초기화 (세션별)
+        if use_memory:
+            self.memory = create_conversation_memory(
+                session_id=self.session_id,
+                supabase_client=supabase,
+                max_turns=5,  # 최근 5턴만 유지 (10 메시지)
+                load_previous=True  # 이전 대화 불러오기
+            )
+        else:
+            self.memory = None
 
         # 단일 LLM 사용 (Gemini 2.5 Flash)
         self.llm = get_llm("flash")
@@ -629,7 +653,8 @@ class AgenticRAG:
         self.streaming = AgentStreaming(
             graph=self.graph,
             llm=self.llm,
-            wandb_logger=self.wandb_logger
+            wandb_logger=self.wandb_logger,
+            memory=self.memory
         )
 
     def _build_graph(self):
@@ -718,6 +743,24 @@ class AgenticRAG:
 
         response_time_ms = int((time.time() - start_time) * 1000)
 
+        # 메모리에 대화 저장
+        if self.memory and hasattr(self.memory, 'add_and_save'):
+            # SupabaseConversationMemory인 경우
+            law_name = retrieved_docs[0].get("law_name") if retrieved_docs else None
+            article = retrieved_docs[0].get("article") if retrieved_docs else None
+
+            self.memory.add_and_save(
+                user_question=question,
+                bot_answer=answer,
+                law_name=law_name,
+                article=article,
+                response_time_ms=response_time_ms
+            )
+        elif self.memory:
+            # 기본 ConversationMemory인 경우
+            self.memory.add_user_message(question)
+            self.memory.add_ai_message(answer)
+
         return {
             "answer": answer,
             "retrieved_docs": retrieved_docs,
@@ -757,7 +800,7 @@ class AgenticRAG:
         # retrieved_docs 파싱
         retrieved_docs = self._parse_retrieved_docs(search_result)
 
-        # 답변 생성 (검색 결과 기반)
+        # 답변 생성 (검색 결과 기반 + 대화 이력)
         messages = [
             SystemMessage(content="""당신은 한국 법령 전문가입니다.
 검색된 법령 내용을 기반으로 정확하고 간결하게 답변하세요.
@@ -767,9 +810,22 @@ class AgenticRAG:
 2. 근거 법령 (법령명 조문, 리스트)
 3. 법령 내용 (원문 인용)
 
-근거 법령을 반드시 명시하세요."""),
-            HumanMessage(content=f"질문: {question}\n\n검색 결과:\n{search_result}")
+근거 법령을 반드시 명시하세요.
+
+**이전 대화가 있다면 맥락을 고려하여 답변하세요:**
+- 사용자가 "그거", "그럼", "추가로" 등으로 이전 질문을 참조할 수 있습니다.
+- **이미 설명한 내용은 반복하지 마세요. 새로운 질문에만 집중하세요.**
+- 예: "주휴수당도 포함되는거야?" → "아니요, 별개입니다." (야근수당 재설명 불필요)
+- 예: "그거 안 주면 어떻게 돼?" → "주휴수당을 안 주면 근로기준법 위반..." (야근수당/주휴수당 재설명 불필요)""")
         ]
+
+        # 이전 대화 이력 추가
+        if self.memory:
+            previous_messages = self.memory.get_messages()
+            messages.extend(previous_messages)
+
+        # 현재 질문 추가
+        messages.append(HumanMessage(content=f"질문: {question}\n\n검색 결과:\n{search_result}"))
 
         response = self.llm.invoke(messages)
         answer = self._extract_answer_text(response)

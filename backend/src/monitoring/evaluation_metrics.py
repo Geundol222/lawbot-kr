@@ -21,6 +21,7 @@ class EvaluationResult:
     # Retrieval Metrics
     recall_at_3: float
     recall_at_5: float
+    recall_at_10: float
     mrr: float  # Mean Reciprocal Rank
     ndcg_at_3: float
 
@@ -53,6 +54,25 @@ class EvaluationMetrics:
     """평가 메트릭 계산 클래스"""
 
     @staticmethod
+    def normalize_article_name(article_str: str) -> str:
+        """
+        법령 조문 이름 정규화
+
+        예:
+            "민법 제750조" → "민법 750"
+            "근로기준법 제56조" → "근로기준법 56"
+            "민법 750" → "민법 750" (변경 없음)
+
+        Returns:
+            정규화된 문자열 (법령명 + 공백 + 숫자)
+        """
+        # "제"와 "조" 제거, 공백 정리
+        normalized = article_str.replace("제", "").replace("조", "").strip()
+        # 연속된 공백을 하나로
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized
+
+    @staticmethod
     def calculate_recall_at_k(
         retrieved_docs: List[Dict[str, Any]],
         ground_truth_articles: List[str],
@@ -72,14 +92,18 @@ class EvaluationMetrics:
         if not ground_truth_articles:
             return 1.0  # 정답이 없으면 perfect score
 
-        # 상위 k개 문서에서 법령명 + 조문 추출
+        # 상위 k개 문서에서 법령명 + 조문 추출 (정규화)
         retrieved_set = set()
         for doc in retrieved_docs[:k]:
             law_article = f"{doc.get('law_name', '')} {doc.get('article', '')}".strip()
-            retrieved_set.add(law_article)
+            normalized = EvaluationMetrics.normalize_article_name(law_article)
+            retrieved_set.add(normalized)
 
-        # Ground Truth와 교집합 계산
-        ground_truth_set = set(ground_truth_articles)
+        # Ground Truth 정규화
+        ground_truth_set = set(
+            EvaluationMetrics.normalize_article_name(article)
+            for article in ground_truth_articles
+        )
         matched = len(retrieved_set.intersection(ground_truth_set))
 
         return matched / len(ground_truth_set)
@@ -98,11 +122,15 @@ class EvaluationMetrics:
         if not ground_truth_articles:
             return 1.0
 
-        ground_truth_set = set(ground_truth_articles)
+        ground_truth_set = set(
+            EvaluationMetrics.normalize_article_name(article)
+            for article in ground_truth_articles
+        )
 
         for rank, doc in enumerate(retrieved_docs, start=1):
             law_article = f"{doc.get('law_name', '')} {doc.get('article', '')}".strip()
-            if law_article in ground_truth_set:
+            normalized = EvaluationMetrics.normalize_article_name(law_article)
+            if normalized in ground_truth_set:
                 return 1.0 / rank
 
         return 0.0  # 정답 문서를 찾지 못함
@@ -122,13 +150,17 @@ class EvaluationMetrics:
         if not ground_truth_articles:
             return 1.0
 
-        ground_truth_set = set(ground_truth_articles)
+        ground_truth_set = set(
+            EvaluationMetrics.normalize_article_name(article)
+            for article in ground_truth_articles
+        )
 
         # DCG 계산
         dcg = 0.0
         for i, doc in enumerate(retrieved_docs[:k], start=1):
             law_article = f"{doc.get('law_name', '')} {doc.get('article', '')}".strip()
-            relevance = 1 if law_article in ground_truth_set else 0
+            normalized = EvaluationMetrics.normalize_article_name(law_article)
+            relevance = 1 if normalized in ground_truth_set else 0
             dcg += relevance / np.log2(i + 1)
 
         # IDCG 계산 (이상적인 순서)
@@ -183,7 +215,14 @@ class EvaluationMetrics:
             }
         """
         citations = EvaluationMetrics.extract_citations_from_answer(answer)
-        ground_truth_set = set(ground_truth_articles)
+        # 정규화
+        citations_normalized = set(
+            EvaluationMetrics.normalize_article_name(c) for c in citations
+        )
+        ground_truth_set = set(
+            EvaluationMetrics.normalize_article_name(article)
+            for article in ground_truth_articles
+        )
 
         if not citations:
             return {
@@ -194,8 +233,8 @@ class EvaluationMetrics:
             }
 
         # Precision: 인용한 법령 중 정답 비율
-        true_positives = len(citations.intersection(ground_truth_set))
-        precision = true_positives / len(citations) if citations else 0.0
+        true_positives = len(citations_normalized.intersection(ground_truth_set))
+        precision = true_positives / len(citations_normalized) if citations_normalized else 0.0
 
         # Recall: 정답 법령 중 인용한 비율
         recall = true_positives / len(ground_truth_set) if ground_truth_set else 0.0
@@ -334,6 +373,7 @@ JSON 형식으로만 답변:
         # Retrieval Metrics
         recall_at_3 = EvaluationMetrics.calculate_recall_at_k(retrieved_docs, ground_truth_articles, k=3)
         recall_at_5 = EvaluationMetrics.calculate_recall_at_k(retrieved_docs, ground_truth_articles, k=5)
+        recall_at_10 = EvaluationMetrics.calculate_recall_at_k(retrieved_docs, ground_truth_articles, k=10)
         mrr = EvaluationMetrics.calculate_mrr(retrieved_docs, ground_truth_articles)
         ndcg_at_3 = EvaluationMetrics.calculate_ndcg_at_k(retrieved_docs, ground_truth_articles, k=3)
 
@@ -363,6 +403,7 @@ JSON 형식으로만 답변:
             # Retrieval
             recall_at_3=recall_at_3,
             recall_at_5=recall_at_5,
+            recall_at_10=recall_at_10,
             mrr=mrr,
             ndcg_at_3=ndcg_at_3,
 
@@ -436,6 +477,7 @@ class ExperimentLogger:
             avg_metrics = {
                 f"eval_summary/{mode}/avg_recall_at_3": np.mean([r.recall_at_3 for r in results]),
                 f"eval_summary/{mode}/avg_recall_at_5": np.mean([r.recall_at_5 for r in results]),
+                f"eval_summary/{mode}/avg_recall_at_10": np.mean([r.recall_at_10 for r in results]),
                 f"eval_summary/{mode}/avg_mrr": np.mean([r.mrr for r in results]),
                 f"eval_summary/{mode}/avg_ndcg_at_3": np.mean([r.ndcg_at_3 for r in results]),
 
@@ -463,6 +505,8 @@ class ExperimentLogger:
 
             print(f"\n✅ {mode} 평균 메트릭:")
             print(f"   Recall@3: {avg_metrics[f'eval_summary/{mode}/avg_recall_at_3']:.3f}")
+            print(f"   Recall@5: {avg_metrics[f'eval_summary/{mode}/avg_recall_at_5']:.3f}")
+            print(f"   Recall@10: {avg_metrics[f'eval_summary/{mode}/avg_recall_at_10']:.3f}")
             print(f"   MRR: {avg_metrics[f'eval_summary/{mode}/avg_mrr']:.3f}")
             print(f"   Citation F1: {avg_metrics[f'eval_summary/{mode}/avg_citation_f1']:.3f}")
             print(f"   Faithfulness: {avg_metrics[f'eval_summary/{mode}/avg_faithfulness']:.3f}")
