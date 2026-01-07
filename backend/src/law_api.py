@@ -157,7 +157,20 @@ def extract_article_content(law_data: dict) -> str:
     """조문 API 응답에서 내용 추출"""
     if "error" in law_data:
         return f"오류: {law_data['error']}"
-    
+
+    def _flatten_text(value) -> str:
+        """문자열/리스트/딕셔너리를 안전하게 문자열로 병합"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return " ".join(_flatten_text(v) for v in value if v is not None)
+        if isinstance(value, dict):
+            # 딕셔너리는 값들만 연결
+            return " ".join(_flatten_text(v) for v in value.values() if v is not None)
+        return str(value)
+
     try:
         law = law_data.get("법령", {})
         articles_data = law.get("조문", {})
@@ -184,16 +197,17 @@ def extract_article_content(law_data: dict) -> str:
             
             # "조문"만 처리
             if jo_type == "조문":
-                jo_num = article.get("조문내용", "제목 없음")
+                jo_num = _flatten_text(article.get("조문내용", "제목 없음"))
                 hang_list = article.get("항", [])
                 
                 if hang_list and isinstance(hang_list, list):
                     contents = []
                     for hang in hang_list:
                         if isinstance(hang, dict):
-                            hang_content = hang.get("항내용", "")
-                            contents.append(hang_content)
-                    
+                            hang_content = _flatten_text(hang.get("항내용", ""))
+                            if hang_content:
+                                contents.append(hang_content)
+                        
                     if contents:
                         full_content = "\n".join(contents)
                         result_parts.append(f"{jo_num}\n{full_content}")
@@ -201,7 +215,7 @@ def extract_article_content(law_data: dict) -> str:
                         result_parts.append(f"{jo_num}: 내용 없음")
                 else:
                     # 항이 없는 경우 조문내용 자체를 출력
-                    jo_content = article.get("조문내용", "")
+                    jo_content = _flatten_text(article.get("조문내용", ""))
                     if isinstance(jo_content, str) and len(jo_content) > 10:
                         result_parts.append(jo_content)
                     else:
@@ -229,6 +243,142 @@ def get_law_content(law_name: str, article: str) -> str:
     """
     law_data = search_and_get_law(law_name, article)
     return extract_article_content(law_data)
+
+
+# ========== 별표/별지/서식 조회 유틸 ========== #
+
+def _find_mst_for_byeol(law_name: str) -> str:
+    """
+    법령명으로 MST(법령일련번호) 찾기
+    - search_law_list 결과에서 법령명한글 일치 시 해당 MST 사용
+    - 일치 결과가 없으면 첫 번째 결과 사용
+    """
+    search_result = search_law_list(law_name)
+    if "error" in search_result:
+        return ""
+
+    law_list = search_result.get("LawSearch", {}).get("law", [])
+    if isinstance(law_list, dict):
+        law_list = [law_list]
+    if not law_list:
+        return ""
+
+    for law in law_list:
+        if law.get("법령명한글") == law_name:
+            return law.get("법령일련번호", "") or ""
+
+    return law_list[0].get("법령일련번호", "") or ""
+
+
+def list_byeol(law_name: str, display: int = 10, page: int = 1, fmt: str = "JSON") -> dict:
+    """
+    별표/별지/서식 목록 조회 (target=licbyl)
+    - search=2: 해당 법령 기준 목록 조회
+    """
+    params = {
+        "OC": LAW_API_OC,
+        "target": "licbyl",
+        "type": fmt,
+        "search": 2,
+        "query": law_name,
+        "display": display,
+        "page": page,
+    }
+    try:
+        res = requests.get(LAW_API_SEARCH, params=params, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        return {"error": f"별표 목록 조회 실패: {e}"}
+
+
+def get_byeol_html(law_name: str, byeol_no: str = "1"):
+    """
+    별표 본문 (HTML) 조회
+    - target=licbyl, type=HTML, search=3
+    """
+    query = f"{law_name} 별표 {byeol_no}"
+    params = {
+        "OC": LAW_API_OC,
+        "target": "licbyl",
+        "type": "HTML",
+        "search": 3,
+        "query": query,
+        "display": 1,
+        "page": 1,
+    }
+    res = requests.get(LAW_API_SEARCH, params=params, timeout=10)
+    res.raise_for_status()
+    return res.text
+
+
+def get_byeol_json(mst: str, byeol_no: str = "1", fmt: str = "JSON") -> dict:
+    """
+    별표 본문 (JSON) 조회
+    - target=law, type=JSON, MST + BY
+    """
+    params = {"OC": LAW_API_OC, "target": "law", "type": fmt, "MST": mst, "BY": byeol_no}
+    res = requests.get(LAW_API_SERVICE, params=params, timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+
+def fetch_byeol(law_name: str, mst: str = "", byeol_no: str = "1", fmt: str = "HTML") -> str:
+    """
+    별표/별지/서식 본문 조회 (HTML + JSON 스니펫)
+    - mst가 있으면 그대로 사용, 없으면 law_name으로 MST 조회
+    - HTML 프리뷰 + 조회 URL, JSON 일부를 함께 반환
+    """
+    mst_value = mst or _find_mst_for_byeol(law_name)
+    if not mst_value:
+        return f"별표 검색 실패: MST(법령일련번호)를 찾지 못했습니다. law_name='{law_name}'"
+
+    # 1) HTML 메인 조회
+    html_preview = ""
+    html_url = ""
+    if fmt.upper() == "HTML":
+        try:
+            html_response = requests.get(
+                LAW_API_SEARCH,
+                params={
+                    "OC": LAW_API_OC,
+                    "target": "licbyl",
+                    "type": "HTML",
+                    "search": 3,
+                    "query": f"{law_name} 별표 {byeol_no}",
+                    "display": 1,
+                    "page": 1,
+                },
+                timeout=10,
+            )
+            html_response.raise_for_status()
+            html_text = html_response.text or ""
+            html_preview = html_text[:1500] + ("... (truncated)" if len(html_text) > 1500 else "")
+            html_url = html_response.url
+        except Exception as e:
+            html_preview = f"(HTML 조회 실패: {e})"
+
+    # 2) JSON 비상개 고증
+    json_snippet = ""
+    try:
+        byeol_json = get_byeol_json(mst_value, byeol_no=byeol_no, fmt="JSON")
+        json_str = str(byeol_json)
+        json_snippet = json_str[:1200] + ("... (truncated)" if len(json_str) > 1200 else "")
+    except Exception as e:
+        json_snippet = f"(JSON 조회 실패: {e})"
+
+    output = []
+    output.append(f"=== {law_name} 별표 {byeol_no} ===")
+    if html_preview:
+        output.append("HTML 프리뷰:")
+        output.append(html_preview)
+    if html_url:
+        output.append(f"조회 URL: {html_url}")
+    if json_snippet:
+        output.append("JSON 발췌:")
+        output.append(json_snippet)
+
+    return "\n".join(output)
 
 
 # 테스트

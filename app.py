@@ -13,7 +13,13 @@ os.environ['PYTHONUNBUFFERED'] = '1'
 backend_path = Path(__file__).parent / 'backend'
 sys.path.insert(0, str(backend_path))
 
-from src.agentic_rag import AgenticRAG
+from src.agentic_rag import AgenticRAG, preload_embedding_model
+from src.embeddings.bm25_search import preload_bm25_index
+
+# 임베딩 모델 미리 로드 (앱 시작 시 한 번만)
+preload_embedding_model()
+# BM25 인덱스 미리 빌드 (백그라운드)
+preload_bm25_index(background=True)
 
 # 페이지 설정
 st.set_page_config(
@@ -37,7 +43,10 @@ if "session_id" not in st.session_state:
 
 # AgenticRAG 인스턴스 초기화 (세션마다 한 번만)
 if "agent" not in st.session_state:
-    st.session_state.agent = AgenticRAG()
+    st.session_state.agent = AgenticRAG(
+        session_id=st.session_state.session_id,  # ← 세션 ID 전달
+        use_memory=True  # ← Buffer Memory 활성화
+    )
 
 # 이전 대화 표시
 for message in st.session_state.messages:
@@ -55,20 +64,57 @@ if prompt := st.chat_input("예: 민법 제750조 알려줘"):
     # 챗봇 응답
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
+        status_placeholder = st.empty()
 
         try:
             # 스트리밍 답변 생성
             full_response = ""
+            current_status = "🔍 준비 중..."
+            import json
 
             for chunk in st.session_state.agent.run_stream(
                 prompt,
                 session_id=st.session_state.session_id
             ):
-                full_response += chunk
-                # 실시간으로 업데이트
-                message_placeholder.markdown(full_response + "▌")
+                # SSE 이벤트 파싱 시도
+                if chunk.startswith("data: "):
+                    try:
+                        event_data = json.loads(chunk[6:])
+                        event_type = event_data.get("type")
+
+                        if event_type == "searching":
+                            current_status = "📚 법령을 검색 중입니다..."
+                            status_placeholder.info(current_status)
+
+                        elif event_type == "checking_exceptions":
+                            articles = event_data.get("articles", [])
+                            current_status = f"💭 예외 조항을 검색중입니다...\n\n확인할 조문: {', '.join(articles)}"
+                            status_placeholder.warning(current_status)
+
+                        elif event_type == "answer_start":
+                            status_placeholder.empty()  # 상태 메시지 제거
+                            current_status = ""
+
+                        elif event_type == "answer_chunk":
+                            text = event_data.get("text", "")
+                            full_response += text
+                            message_placeholder.markdown(full_response + "▌")
+
+                        elif event_type == "error":
+                            error_msg = event_data.get("message", "Unknown error")
+                            status_placeholder.error(f"❌ {error_msg}")
+
+                    except json.JSONDecodeError:
+                        # JSON이 아니면 일반 텍스트로 처리 (하위 호환)
+                        full_response += chunk
+                        message_placeholder.markdown(full_response + "▌")
+                else:
+                    # SSE 형식이 아니면 일반 텍스트
+                    full_response += chunk
+                    message_placeholder.markdown(full_response + "▌")
 
             # 커서 제거하고 최종 답변 표시
+            status_placeholder.empty()
             message_placeholder.markdown(full_response)
 
             # 응답 저장
@@ -78,7 +124,8 @@ if prompt := st.chat_input("예: 민법 제750조 알려줘"):
             })
 
         except Exception as e:
-            error_msg = f"❌ 오류가 발생했습니다: {str(e)}"
+            import traceback
+            error_msg = f"❌ 오류가 발생했습니다: {str(e)}\n\n{traceback.format_exc()}"
             message_placeholder.error(error_msg)
             st.session_state.messages.append({
                 "role": "assistant",

@@ -13,7 +13,9 @@ class TestVectorSearchUnit:
 
     @patch("backend.src.embeddings.vector_search.SentenceTransformer")
     @patch("backend.src.embeddings.vector_search.create_client")
-    def test_search_with_results(self, mock_supabase, mock_model):
+    @patch("backend.src.embeddings.vector_search.get_bm25_instance")
+    @patch("backend.src.embeddings.vector_search.CrossEncoder")
+    def test_search_with_results(self, mock_cross, mock_bm25, mock_supabase, mock_model):
         """검색 결과가 있는 경우"""
         # Supabase Mock 설정
         mock_client = MagicMock()
@@ -32,13 +34,18 @@ class TestVectorSearchUnit:
         ]
         mock_client.rpc.return_value = mock_rpc_result
 
-        # 임베딩 모델 Mock
+        # 임베딩/리랭커/BM25 Mock
         mock_model_instance = MagicMock()
         mock_model_instance.encode.return_value = [0.1] * 1024
         mock_model.return_value = mock_model_instance
+        mock_cross.return_value = MagicMock(predict=lambda pairs: [0.9] * len(pairs))
+        mock_bm25.return_value = MagicMock(search=lambda q, top_k: [])
 
-        # 테스트 실행
         vs = VectorSearch()
+        # semantic/BM25 호출을 고정
+        vs._semantic_search_rpc = MagicMock(return_value=(mock_rpc_result.data, "RPC"))
+        vs._bm25_search_safe = MagicMock(return_value=[])
+
         results = vs.search("야근수당", top_k=5, threshold=0.7)
 
         assert len(results) == 1
@@ -47,7 +54,9 @@ class TestVectorSearchUnit:
 
     @patch("backend.src.embeddings.vector_search.SentenceTransformer")
     @patch("backend.src.embeddings.vector_search.create_client")
-    def test_search_no_results(self, mock_supabase, mock_model):
+    @patch("backend.src.embeddings.vector_search.get_bm25_instance")
+    @patch("backend.src.embeddings.vector_search.CrossEncoder")
+    def test_search_no_results(self, mock_cross, mock_bm25, mock_supabase, mock_model):
         """검색 결과가 없는 경우 (유사도 낮음)"""
         mock_client = MagicMock()
         mock_supabase.return_value = mock_client
@@ -59,15 +68,21 @@ class TestVectorSearchUnit:
         mock_model_instance = MagicMock()
         mock_model_instance.encode.return_value = [0.1] * 1024
         mock_model.return_value = mock_model_instance
+        mock_cross.return_value = MagicMock(predict=lambda pairs: [0.1] * len(pairs))
+        mock_bm25.return_value = MagicMock(search=lambda q, top_k: [])
 
         vs = VectorSearch()
+        vs._semantic_search_rpc = MagicMock(return_value=([], "RPC"))
+        vs._bm25_search_safe = MagicMock(return_value=[])
         results = vs.search("무관한 질문", top_k=5, threshold=0.7)
 
         assert len(results) == 0
 
     @patch("backend.src.embeddings.vector_search.SentenceTransformer")
     @patch("backend.src.embeddings.vector_search.create_client")
-    def test_deduplicate_chunks(self, mock_supabase, mock_model):
+    @patch("backend.src.embeddings.vector_search.get_bm25_instance")
+    @patch("backend.src.embeddings.vector_search.CrossEncoder")
+    def test_deduplicate_chunks(self, mock_cross, mock_bm25, mock_supabase, mock_model):
         """청크 중복 제거 테스트"""
         mock_client = MagicMock()
         mock_supabase.return_value = mock_client
@@ -78,7 +93,7 @@ class TestVectorSearchUnit:
             {
                 "id": 1,
                 "law_name": "민법",
-                "article": "제750조_part1",
+                "article": "제750조",
                 "mst": "002345",
                 "content": "내용 1",
                 "similarity": 0.85
@@ -86,7 +101,7 @@ class TestVectorSearchUnit:
             {
                 "id": 2,
                 "law_name": "민법",
-                "article": "제750조_part2",
+                "article": "제750조",
                 "mst": "002345",
                 "content": "내용 2",
                 "similarity": 0.82
@@ -105,8 +120,13 @@ class TestVectorSearchUnit:
         mock_model_instance = MagicMock()
         mock_model_instance.encode.return_value = [0.1] * 1024
         mock_model.return_value = mock_model_instance
+        mock_cross.return_value = MagicMock(predict=lambda pairs: [0.9, 0.8, 0.7])
+        mock_bm25.return_value = MagicMock(search=lambda q, top_k: [])
 
         vs = VectorSearch()
+        vs._semantic_search_rpc = MagicMock(return_value=(mock_rpc_result.data, "RPC"))
+        vs._bm25_search_safe = MagicMock(return_value=[])
+
         results = vs.search("불법행위", top_k=5, threshold=0.7)
 
         # 제750조는 하나만 남아야 함 (최고 유사도)

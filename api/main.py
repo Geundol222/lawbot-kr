@@ -15,7 +15,7 @@ import json
 backend_path = Path(__file__).parent.parent / 'backend'
 sys.path.insert(0, str(backend_path))
 
-from src.agentic_rag import AgenticRAG
+from src.agentic_rag import AgenticRAG, preload_embedding_model
 from src.monitoring import get_wandb_logger, FastAPILogger
 
 # FastAPI 앱
@@ -52,6 +52,13 @@ def get_agent():
         print("✅ AgenticRAG 초기화 완료")
     return agent
 
+# 앱 시작 시 임베딩 모델 미리 로드
+@app.on_event("startup")
+async def startup_event():
+    """FastAPI 앱 시작 시 실행"""
+    print("🚀 FastAPI 앱 시작 - 임베딩 모델 로딩 시작...")
+    preload_embedding_model()
+
 # Request/Response 모델
 class ChatRequest(BaseModel):
     question: str
@@ -60,6 +67,12 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     session_id: str
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    message_index: int
+    feedback_type: str  # 'positive' or 'negative'
+    message_content: str
 
 # 엔드포인트
 @app.get("/")
@@ -220,6 +233,45 @@ async def chat_stream(request: ChatRequest, http_request: Request, http_response
             "X-Accel-Buffering": "no"  # Nginx 버퍼링 비활성화
         }
     )
+
+
+@app.post("/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """
+    사용자 피드백 저장
+
+    Args:
+        request: FeedbackRequest
+            - session_id: 세션 ID
+            - message_index: 메시지 인덱스
+            - feedback_type: 'positive' or 'negative'
+            - message_content: 메시지 내용
+
+    Returns:
+        {"success": True}
+    """
+    try:
+        from src.supabase_client import supabase
+
+        # Supabase에 피드백 저장
+        feedback_data = {
+            "session_id": request.session_id,
+            "message_index": request.message_index,
+            "feedback_type": request.feedback_type,
+            "message_content": request.message_content,
+        }
+
+        result = supabase.table("user_feedback").insert(feedback_data).execute()
+
+        return {"success": True, "id": result.data[0]["id"] if result.data else None}
+
+    except Exception as e:
+        print(f"⚠️ 피드백 저장 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save feedback: {str(e)}"
+        )
+
 
 if __name__ == "__main__":
     import uvicorn

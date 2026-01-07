@@ -1,0 +1,97 @@
+[
+  {
+    "id": "q001",
+    "question": "민법 제750조가 뭐야?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q002",
+    "question": "야근수당은 얼마나 받을 수 있어?",
+    "category": "situation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q003",
+    "question": "회사가 야근수당을 안 주는데 어떻게 해야 해?",
+    "category": "situation",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q004",
+    "question": "근로기준법 제56조 연장근로 가산수당이 어떻게 돼?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q005",
+    "question": "월세 계약을 중도 해지하고 싶은데 보증금을 돌려받을 수 있어?",
+    "category": "situation",
+    "difficulty": "hard"
+  },
+  {
+    "id": "q006",
+    "question": "교통사고로 다쳤을 때 보상은 어떻게 받아?",
+    "category": "situation",
+    "difficulty": "hard"
+  },
+  {
+    "id": "q007",
+    "question": "형법 제250조는 무슨 내용이야?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q008",
+    "question": "헌법 제1조 1항이 뭐야?",
+    "category": "specific_article",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q009",
+    "question": "근로기준법 별표 1에서 정한 업종은 뭐야?",
+    "category": "specific_article",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q010",
+    "question": "부당해고를 당했을 때 어떻게 대응해야 해?",
+    "category": "situation",
+    "difficulty": "hard"
+  },
+  {
+    "id": "q011",
+    "question": "5인 미만 사업장에서 해고 예고수당은 어떻게 되나요?",
+    "category": "exception_scope",
+    "difficulty": "hard",
+    "note": "Self-RAG 오답 케이스 (제11조 vs 제26조 혼동)"
+  },
+  {
+    "id": "q012",
+    "question": "3개월 미만 근무자도 해고 예고수당을 받을 수 있어?",
+    "category": "exception_scope",
+    "difficulty": "medium",
+    "note": "제26조 단서 조항 확인 필요"
+  },
+  {
+    "id": "q013",
+    "question": "4인 사업장 근로자도 연차휴가를 받을 수 있어?",
+    "category": "exception_scope",
+    "difficulty": "hard",
+    "note": "제11조 적용범위 vs 제60조 연차휴가"
+  },
+  {
+    "id": "q014",
+    "question": "임신 중인 여성 근로자의 야간근로는 가능해?",
+    "category": "exception_scope",
+    "difficulty": "medium",
+    "note": "제70조 예외 조항 확인 필요"
+  },
+  {
+    "id": "q015",
+    "question": "최저임금법이 적용되지 않는 경우가 있어?",
+    "category": "exception_scope",
+    "difficulty": "hard",
+    "note": "멀티홉 추론 (최저임금법 제3조 적용 제외)"
+  }
+]

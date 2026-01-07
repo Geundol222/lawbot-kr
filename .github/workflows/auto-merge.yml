@@ -1,0 +1,132 @@
+name: Auto PR & Merge to Main
+
+on:
+  push:
+    branches: [ develop ]
+
+jobs:
+  create-pr-and-merge:
+    name: Create PR and Auto-Merge to Main
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check if PR already exists
+      id: check-pr
+      run: |
+        PR_EXISTS=$(gh pr list --head develop --base main --json number --jq length)
+        echo "pr_exists=$PR_EXISTS" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+    - name: Create Pull Request
+      if: steps.check-pr.outputs.pr_exists == '0'
+      id: create-pr
+      run: |
+        PR_URL=$(gh pr create \
+          --base main \
+          --head develop \
+          --title "🚀 Auto Deploy: develop → main" \
+          --body "$(cat <<'EOF'
+        ## 자동 배포 PR
+
+        develop 브랜치의 변경사항을 main으로 자동 배포합니다.
+
+        ### CI 테스트
+        - ✅ Python 3.12 테스트
+        - ✅ 코드 품질 검사 (flake8, black, isort, mypy)
+
+        ### 배포 대상
+        - 🚀 HuggingFace Spaces
+        - ✨ Vercel (Frontend)
+
+        ---
+        🤖 이 PR은 자동으로 생성되었으며, CI 테스트 통과 시 자동으로 merge됩니다.
+        EOF
+        )")
+        echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+
+        # PR 번호 추출
+        PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
+        echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+    - name: Get existing PR number
+      if: steps.check-pr.outputs.pr_exists != '0'
+      id: get-pr
+      run: |
+        PR_NUMBER=$(gh pr list --head develop --base main --json number --jq '.[0].number')
+        echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+    - name: Wait for CI checks
+      run: |
+        PR_NUMBER=${{ steps.create-pr.outputs.pr_number || steps.get-pr.outputs.pr_number }}
+        echo "Waiting for CI checks on PR #$PR_NUMBER..."
+
+        # CI 체크 완료 대기 (최대 10분)
+        timeout=600
+        elapsed=0
+        while [ $elapsed -lt $timeout ]; do
+          # Auto-merge 워크플로우 자체를 제외하고 CI 워크플로우만 확인
+          CI_STATUS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[] | select(.name != "Create PR and Auto-Merge to Main") | .status' | sort -u)
+          CI_CONCLUSIONS=$(gh pr view $PR_NUMBER --json statusCheckRollup --jq '.statusCheckRollup[] | select(.name != "Create PR and Auto-Merge to Main") | .conclusion' | grep -v "null" | sort -u)
+
+          echo "CI status (excluding auto-merge): $CI_STATUS"
+          echo "CI conclusions: $CI_CONCLUSIONS"
+
+          # FAILURE가 있으면 실패
+          if echo "$CI_CONCLUSIONS" | grep -q "FAILURE"; then
+            echo "❌ CI checks failed!"
+            exit 1
+          fi
+
+          # 모든 CI 체크가 COMPLETED이고 모든 conclusion이 SUCCESS면 성공
+          if ! echo "$CI_STATUS" | grep -qE "PENDING|IN_PROGRESS|QUEUED"; then
+            if echo "$CI_CONCLUSIONS" | grep -q "SUCCESS" && ! echo "$CI_CONCLUSIONS" | grep -qE "FAILURE|CANCELLED"; then
+              echo "✅ All CI checks passed!"
+              break
+            fi
+          fi
+
+          echo "⏳ Waiting for CI checks... ($elapsed seconds elapsed)"
+          sleep 30
+          elapsed=$((elapsed + 30))
+        done
+
+        if [ $elapsed -ge $timeout ]; then
+          echo "⏰ Timeout waiting for CI checks"
+          exit 1
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+    - name: Enable auto-merge
+      run: |
+        PR_NUMBER=${{ steps.create-pr.outputs.pr_number || steps.get-pr.outputs.pr_number }}
+        echo "Enabling auto-merge for PR #$PR_NUMBER..."
+
+        # GitHub의 auto-merge 기능 활성화
+        gh pr merge $PR_NUMBER \
+          --auto \
+          --merge \
+          --delete-branch=false
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+    - name: Deployment notification
+      if: success()
+      run: |
+        echo "🎉 Successfully merged to main!"
+        echo "🚀 Deployment to HuggingFace and Vercel will start automatically"
+
+    - name: Failure notification
+      if: failure()
+      run: |
+        echo "❌ Auto-merge failed. Please check CI logs and merge manually."

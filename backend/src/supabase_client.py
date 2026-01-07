@@ -1,6 +1,15 @@
 import os
+import sys
 from uuid import UUID, uuid4
 from supabase import create_client, Client
+
+# Windows console encoding fix
+if sys.platform == "win32":
+    import io
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from src.config import SUPABASE_KEY, SUPABASE_URL
 
@@ -10,6 +19,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 print(f"✅ Supabase URL: {'설정됨' if SUPABASE_URL else '없음'}")
 print(f"✅ Supabase KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
 
+# Supabase 클라이언트 생성 (타임아웃 30초)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 

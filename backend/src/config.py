@@ -1,8 +1,14 @@
 import os
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# 환경변수는 바로 로드 (로컬 개발용, .env 파일이 없으면 무시)
-load_dotenv()
+# 환경변수 로드 (CI 테스트 환경에서는 .env.test 우선 로드)
+if os.getenv('CI') and os.path.exists('.env.test'):
+    # GitHub Actions CI 환경
+    load_dotenv('.env.test', override=True)
+else:
+    # 로컬 개발 환경
+    load_dotenv()  # .env 파일이 없으면 무시
 
 # 법령 API
 LAW_API_SERVICE = os.getenv('LAW_API_SERVICE')
@@ -30,15 +36,15 @@ def validate_required_env_vars():
     missing_vars = [var_name for var_name, var_value in required_vars.items() if not var_value]
 
     if missing_vars:
-        error_msg = f"❌ 필수 환경변수가 설정되지 않았습니다: {', '.join(missing_vars)}"
+        error_msg = f"[ERROR] 필수 환경변수가 설정되지 않았습니다: {', '.join(missing_vars)}"
         print(error_msg)
-        print("\n💡 Hugging Face Spaces에서:")
-        print("   Settings → Variables → Add variable에서 환경변수를 설정하세요.")
-        print("\n💡 로컬 개발 환경에서:")
+        print("\n[INFO] Hugging Face Spaces에서:")
+        print("   Settings -> Variables -> Add variable에서 환경변수를 설정하세요.")
+        print("\n[INFO] 로컬 개발 환경에서:")
         print("   .env 파일을 생성하고 환경변수를 설정하세요.")
         raise ValueError(error_msg)
 
-    print("✅ 환경변수 로드 완료:")
+    print("[OK] 환경변수 로드 완료:")
     print(f"   - SUPABASE_URL: {'설정됨' if SUPABASE_URL else '없음'}")
     print(f"   - SUPABASE_ANON_KEY: {'설정됨' if SUPABASE_KEY else '없음'}")
     print(f"   - GOOGLE_API_KEY: {'설정됨' if GOOGLE_API_KEY else '없음'}")
@@ -89,3 +95,37 @@ def get_llm(model: str = "flash"):
         )
 
     return _llm_instances[model]
+
+
+# LLM API 재시도 래퍼
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((Exception,)),
+    reraise=True
+)
+def llm_invoke_with_retry(llm, *args, **kwargs):
+    """
+    LLM invoke 메서드를 재시도 로직과 함께 실행
+
+    Rate Limit, Timeout 등의 에러 발생 시 최대 3회 재시도
+    - 1차 실패: 2초 대기 후 재시도
+    - 2차 실패: 4초 대기 후 재시도
+    - 3차 실패: 예외 발생
+    """
+    return llm.invoke(*args, **kwargs)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((Exception,)),
+    reraise=True
+)
+def llm_stream_with_retry(llm, *args, **kwargs):
+    """
+    LLM stream 메서드를 재시도 로직과 함께 실행
+
+    Rate Limit, Timeout 등의 에러 발생 시 최대 3회 재시도
+    """
+    return llm.stream(*args, **kwargs)

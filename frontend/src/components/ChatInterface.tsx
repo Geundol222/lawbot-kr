@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { chatStreamAPI } from '@/lib/api';
+import { chatStreamAPI, submitFeedback } from '@/lib/api';
 import { useStats } from '@/contexts/StatsContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,6 +10,8 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp?: Date;
+  error?: boolean;
+  lawReferences?: Array<{ law_name: string; article: string }>;
 }
 
 export default function ChatInterface() {
@@ -22,6 +24,29 @@ export default function ChatInterface() {
   const { updateStats } = useStats();
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
+
+  // localStorage에서 히스토리 로드
+  useEffect(() => {
+    const savedMessages = localStorage.getItem(`chat-history-${sessionId}`);
+    if (savedMessages) {
+      try {
+        const parsed = JSON.parse(savedMessages);
+        setMessages(parsed.map((msg: Message) => ({
+          ...msg,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : undefined
+        })));
+      } catch (e) {
+        console.error('Failed to load chat history:', e);
+      }
+    }
+  }, [sessionId]);
+
+  // 메시지 변경 시 localStorage에 저장
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(`chat-history-${sessionId}`, JSON.stringify(messages));
+    }
+  }, [messages, sessionId]);
 
   // 사용자가 스크롤했는지 감지
   const handleScroll = () => {
@@ -44,12 +69,19 @@ export default function ChatInterface() {
     }
   }, [messages, shouldAutoScroll, isStreaming]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+  const handleRetry = (questionToRetry: string) => {
+    setInput(questionToRetry);
+    // 자동으로 전송하지 않고 입력창에만 채워줌
+  };
 
-    const question = input;
-    setInput('');
+  const handleSubmit = async (e: React.FormEvent, retryQuestion?: string) => {
+    e.preventDefault();
+    const question = retryQuestion || input;
+    if (!question.trim() || loading) return;
+
+    if (!retryQuestion) {
+      setInput('');
+    }
     setLoading(true);
     setIsStreaming(true);
     setShouldAutoScroll(true); // 새 질문 시작 시 자동 스크롤 활성화
@@ -72,34 +104,6 @@ export default function ChatInterface() {
     ]);
 
     let fullResponse = '';
-    let isFirstChunk = true;
-    let displayQueue: string[] = [];
-    let isDisplaying = false;
-
-    // 큐에서 한글자씩 천천히 표시하는 함수
-    const displayCharacters = () => {
-      if (displayQueue.length === 0) {
-        isDisplaying = false;
-        return;
-      }
-
-      isDisplaying = true;
-      const char = displayQueue.shift()!;
-      fullResponse += char;
-
-      setMessages(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = {
-          role: 'assistant',
-          content: fullResponse + '▌',
-          timestamp: new Date(),
-        };
-        return newMessages;
-      });
-
-      // 20ms 후 다음 글자 표시
-      setTimeout(displayCharacters, 20);
-    };
 
     try {
       await chatStreamAPI(
@@ -107,50 +111,61 @@ export default function ChatInterface() {
           question,
           session_id: sessionId,
         },
-        // onChunk: 청크가 올 때마다 큐에 추가
-        (chunk: string) => {
-          // 첫 청크면 로딩 메시지 제거
-          if (isFirstChunk) {
-            isFirstChunk = false;
-          }
-
-          // 청크의 각 글자를 큐에 추가
-          for (const char of chunk) {
-            displayQueue.push(char);
-          }
-
-          // 표시 중이 아니면 시작
-          if (!isDisplaying) {
-            displayCharacters();
-          }
-        },
-        // onDone: 완료되면 큐가 비워질 때까지 기다린 후 커서 제거
+        // onSearching: 법령 검색 중
         () => {
-          // 큐가 비워질 때까지 대기
-          const waitForQueue = () => {
-            if (displayQueue.length > 0 || isDisplaying) {
-              setTimeout(waitForQueue, 100);
-              return;
-            }
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: '📚 법령을 검색 중입니다...',
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onCheckingExceptions: 예외조항 확인 중
+        (articles: string[]) => {
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: `💭 예외 조항이 있는 것 같습니다. 예외 조항을 검색중입니다...\n\n확인할 조문: ${articles.join(', ')}`,
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onAnswerChunk: 실시간 스트리밍 (LLM에서 직접 전송)
+        (chunk: string) => {
+          fullResponse += chunk;
 
-            // 큐가 비워졌으면 커서 제거
-            const responseTime = (Date.now() - startTime) / 1000;
-            updateStats(responseTime, true);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: fullResponse + '▌',  // 커서 표시
+              timestamp: new Date(),
+            };
+            return newMessages;
+          });
+        },
+        // onDone: 완료
+        (lawReferences) => {
+          const responseTime = (Date.now() - startTime) / 1000;
+          updateStats(responseTime, true);
 
-            setMessages(prev => {
-              const newMessages = [...prev];
-              newMessages[newMessages.length - 1] = {
-                role: 'assistant',
-                content: fullResponse, // 커서 제거
-                timestamp: new Date(),
-              };
-              return newMessages;
-            });
-            setLoading(false);
-            setIsStreaming(false);
-          };
-
-          waitForQueue();
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: fullResponse,  // 커서 제거
+              timestamp: new Date(),
+              lawReferences: lawReferences,  // 법령 출처 추가
+            };
+            return newMessages;
+          });
+          setLoading(false);
+          setIsStreaming(false);
         },
         // onError: 에러 처리
         (error: string) => {
@@ -158,12 +173,24 @@ export default function ChatInterface() {
           const responseTime = (Date.now() - startTime) / 1000;
           updateStats(responseTime, false);
 
+          // 에러 타입 분류
+          let errorMessage = '죄송합니다. 일시적인 오류가 발생했습니다.';
+
+          if (error.includes('fetch') || error.includes('network')) {
+            errorMessage = '네트워크 연결에 문제가 있습니다. 인터넷 연결을 확인해주세요.';
+          } else if (error.includes('timeout')) {
+            errorMessage = '응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.';
+          } else if (error.includes('500') || error.includes('Internal Server')) {
+            errorMessage = '서버에서 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+          }
+
           setMessages(prev => {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1] = {
               role: 'assistant',
-              content: '죄송합니다. 일시적인 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
+              content: `❌ **${errorMessage}**\n\n오류 내용: ${error}\n\n다시 시도하시려면 아래 버튼을 눌러주세요.`,
               timestamp: new Date(),
+              error: true,
             };
             return newMessages;
           });
@@ -320,6 +347,117 @@ export default function ChatInterface() {
                         <div className="whitespace-pre-wrap">{msg.content}</div>
                       )}
                     </div>
+
+                    {/* 법령 출처 표시 */}
+                    {msg.role === 'assistant' && msg.lawReferences && msg.lawReferences.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <div className="flex items-start space-x-2">
+                          <svg className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
+                          </svg>
+                          <div className="flex-1">
+                            <div className="text-xs font-semibold text-gray-600 mb-1">참조 법령</div>
+                            <div className="flex flex-wrap gap-2">
+                              {msg.lawReferences.map((ref, i) => (
+                                <a
+                                  key={i}
+                                  href={`https://law.go.kr/LSW/lsInfoP.do?lsiSeq=${ref.law_name}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center px-2 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 hover:bg-blue-100 transition-colors"
+                                >
+                                  <span className="font-medium">{ref.law_name}</span>
+                                  {ref.article && <span className="ml-1">제{ref.article}조</span>}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 액션 버튼 (assistant 메시지에만 표시) */}
+                    {msg.role === 'assistant' && !msg.error && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
+                        {/* 복사 버튼 */}
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(msg.content);
+                            // TODO: 복사 완료 토스트 메시지
+                          }}
+                          className="flex items-center space-x-1 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          <span>복사</span>
+                        </button>
+
+                        {/* 피드백 버튼 */}
+                        <div className="flex items-center space-x-1">
+                          <span className="text-xs text-gray-500 mr-2">도움이 되었나요?</span>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await submitFeedback({
+                                  session_id: sessionId,
+                                  message_index: idx,
+                                  feedback_type: 'positive',
+                                  message_content: msg.content,
+                                });
+                                // TODO: 성공 토스트 메시지
+                                console.log('Positive feedback submitted');
+                              } catch (error) {
+                                console.error('Failed to submit feedback:', error);
+                              }
+                            }}
+                            className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                            title="도움됨"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await submitFeedback({
+                                  session_id: sessionId,
+                                  message_index: idx,
+                                  feedback_type: 'negative',
+                                  message_content: msg.content,
+                                });
+                                // TODO: 성공 토스트 메시지
+                                console.log('Negative feedback submitted');
+                              } catch (error) {
+                                console.error('Failed to submit feedback:', error);
+                              }
+                            }}
+                            className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="도움안됨"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 에러 발생 시 재시도 버튼 */}
+                    {msg.role === 'assistant' && msg.error && idx > 0 && messages[idx - 1].role === 'user' && (
+                      <div className="mt-3 pt-3 border-t border-red-200">
+                        <button
+                          onClick={() => handleRetry(messages[idx - 1].content)}
+                          className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-colors font-medium"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          <span>다시 시도</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
