@@ -20,16 +20,18 @@ vector_search_instance = VectorSearch()
 class AgentStreaming:
     """Agent 스트리밍 로직을 담당하는 클래스"""
 
-    def __init__(self, graph, llm, wandb_logger=None):
+    def __init__(self, graph, llm, wandb_logger=None, memory=None):
         """
         Args:
             graph: 컴파일된 LangGraph
             llm: 답변 생성용 LLM
             wandb_logger: WandB 로거 (선택)
+            memory: ConversationMemory (선택)
         """
         self.graph = graph
         self.llm = llm
         self.wandb_logger = wandb_logger
+        self.memory = memory
 
     def _run_stream_sync(self, question: str, session_id: str, start_time: float):
         """동기 스트리밍 로직 - SSE 이벤트 전송"""
@@ -59,10 +61,19 @@ class AgentStreaming:
 - 같은 법령을 중복 검색하지 마세요
 - check_exceptions_needed 결과에 따라 추가 조문 검색
 - 별표/별지/서식이 발견되면 search_byeol로 별표 본문을 함께 조회
-- 충분한 정보를 얻으면 종료하세요"""
-            ),
-            HumanMessage(content=question)
+- 충분한 정보를 얻으면 종료하세요
+
+**이전 대화가 있다면 맥락을 고려하여 검색하세요.**"""
+            )
         ]
+
+        # 이전 대화 이력 추가 (메모리가 있으면)
+        if self.memory:
+            previous_messages = self.memory.get_messages()
+            initial_messages.extend(previous_messages)
+
+        # 현재 질문 추가
+        initial_messages.append(HumanMessage(content=question))
 
         initial_state = {
             "messages": initial_messages,
@@ -173,6 +184,12 @@ class AgentStreaming:
             # 답변 생성용 프롬프트 추가
             answer_generation_prompt = SystemMessage(
                 content="""위 메시지에서 도구(tool)가 전달한 법령/판례 정보를 바탕으로 답변을 작성하세요.
+
+**이전 대화가 있다면 맥락을 고려하여 답변하세요:**
+- 사용자가 "그거", "그럼", "추가로" 등으로 이전 질문을 참조할 수 있습니다.
+- **이미 설명한 내용은 반복하지 마세요. 새로운 질문에만 집중하세요.**
+- 예: "주휴수당도 포함되는거야?" → "아니요, 별개입니다." (야근수당 재설명 불필요)
+- 예: "그거 안 주면 어떻게 돼?" → "주휴수당을 안 주면 근로기준법 위반..." (야근수당/주휴수당 재설명 불필요)
 
 **중요: 도구 결과 확인 방법**
 - 위 메시지 중 "=== 벡터 검색 결과 ===" 섹션에서 법령명, 조문, 내용을 찾으세요
@@ -314,7 +331,7 @@ class AgentStreaming:
             total_tokens = len(question.split()) + len(full_answer.split())
             self.wandb_logger.end_session(full_answer, total_tokens)
 
-        # Supabase 대화 로그 저장
+        # 대화 저장 (Supabase + Memory)
         try:
             law_name = None
             article = None
@@ -323,16 +340,42 @@ class AgentStreaming:
                 law_name = top.get("law_name")
                 article = top.get("article")
 
-            save_conversation(
-                session_id=session_id,
-                user_question=question,
-                bot_answer=full_answer,
-                law_name=law_name,
-                article=article,
-                response_time_ms=int((time.time() - start_time) * 1000)
-            )
+            response_time_ms = int((time.time() - start_time) * 1000)
+
+            # 메모리에 저장 (SupabaseConversationMemory면 DB도 자동 저장)
+            if self.memory and hasattr(self.memory, 'add_and_save'):
+                self.memory.add_and_save(
+                    user_question=question,
+                    bot_answer=full_answer,
+                    law_name=law_name,
+                    article=article,
+                    response_time_ms=response_time_ms
+                )
+            elif self.memory:
+                # 기본 ConversationMemory인 경우
+                self.memory.add_user_message(question)
+                self.memory.add_ai_message(full_answer)
+                # DB 저장은 별도로
+                save_conversation(
+                    session_id=session_id,
+                    user_question=question,
+                    bot_answer=full_answer,
+                    law_name=law_name,
+                    article=article,
+                    response_time_ms=response_time_ms
+                )
+            else:
+                # 메모리 없으면 DB만 저장
+                save_conversation(
+                    session_id=session_id,
+                    user_question=question,
+                    bot_answer=full_answer,
+                    law_name=law_name,
+                    article=article,
+                    response_time_ms=response_time_ms
+                )
         except Exception as e:
-            print(f"⚠️ Supabase 대화 저장 실패: {e}")
+            print(f"⚠️ 대화 저장 실패: {e}")
 
     def run_stream(self, question: str, session_id: Optional[str] = None):
         """Agent 실행 (streaming)"""

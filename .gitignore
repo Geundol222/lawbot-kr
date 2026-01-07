@@ -56,3 +56,32 @@ frontend/.env*.local
 
 # 면접 준비 자료 (개인용)
 INTERVIEW_GUIDE.md
+docs/portfolio_guide.md
+docs/evaluation_results.md
+docs/search_quality_improvement_plan.md
+docs/buffer_memory.md
+
+# 테스트 파일 (개인용)
+test_buffer_memory.py
+test_*.py
+run_*.py
+
+# 로그 파일
+*.log
+DEBUG/
+
+# 개발 임시 파일
+backups/
+temp_backup/
+analysis_tools/
+notebooks/
+
+# 실험 결과 (개인용)
+datasets/exception_experiment_*.json
+datasets/ground_truth_clean.json
+
+# 추가 개인 문서
+docs/EXPERIMENT_RESULTS.md
+
+# 설정 실험 파일
+configs/

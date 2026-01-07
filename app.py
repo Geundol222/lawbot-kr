@@ -43,7 +43,10 @@ if "session_id" not in st.session_state:
 
 # AgenticRAG 인스턴스 초기화 (세션마다 한 번만)
 if "agent" not in st.session_state:
-    st.session_state.agent = AgenticRAG()
+    st.session_state.agent = AgenticRAG(
+        session_id=st.session_state.session_id,  # ← 세션 ID 전달
+        use_memory=True  # ← Buffer Memory 활성화
+    )
 
 # 이전 대화 표시
 for message in st.session_state.messages:
