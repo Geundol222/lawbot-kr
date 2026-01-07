@@ -82,3 +82,8 @@ docs/EXPERIMENT_RESULTS.md
 
 # 설정 실험 파일
 configs/
+
+# HuggingFace 제한 바이너리 파일
+*.pkl
+docs/images/*.png
+docs/images/*.jpg

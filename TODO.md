@@ -42,9 +42,8 @@
 - Frontend: Next.js + React 스트리밍 UI
 - 체감 속도: 10초 → 0.5초 (20배 개선)
 
-3. 하이브리드 LLM 전략
-- Tool calling: Gemini 2.0 Flash Thinking (정확한 법령명 추론)
-- 답변 생성: Gemini 2.5 Flash (빠른 생성)
+3. LLM 전략
+- 모델: Gemini 2.5 Flash (Tool calling 및 답변 생성)
 - 효과: 법령명 매핑 정확도 70% → 95%
 - 비용/속도: Pro 대비 10배 빠르고 저렴
 
