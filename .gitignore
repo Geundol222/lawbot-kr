@@ -57,9 +57,6 @@ frontend/.env*.local
 # 면접 준비 자료 (개인용)
 INTERVIEW_GUIDE.md
 docs/portfolio_guide.md
-docs/evaluation_results.md
-docs/search_quality_improvement_plan.md
-docs/buffer_memory.md
 
 # 테스트 파일 (개인용)
 test_buffer_memory.py
