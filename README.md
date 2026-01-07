@@ -26,7 +26,7 @@
 - 🔍 **Hybrid Search**: Semantic (E5-large) + BM25 + Reranker (BGE) 3단계 검색
 - 🧠 **Self-RAG**: 예외 조항 자동 감지 및 적용 ("다만", "단서" 등)
 - 💬 **Buffer Memory**: 세션 기반 대화 맥락 유지 (이전 대화 참조 가능)
-- ⚡ **실시간 스트리밍**: SSE 기반 답변 실시간 전송 (Gemini 2.0 Flash Thinking)
+- ⚡ **실시간 스트리밍**: SSE 기반 답변 실시간 전송 (Gemini 2.5 Flash)
 - 📊 **정량 평가**: Ground Truth 기반 Recall@k, MRR, NDCG, Citation F1 측정
 - 🚀 **CI/CD**: GitHub Actions 자동 테스트 & 배포
 
@@ -67,7 +67,7 @@ flowchart LR
 
     Agent -->|1. 벡터 검색| VectorDB[(📊 Supabase<br/>pgvector)]
     Agent -->|2. 법령 API| LawAPI[📚 법제처 API]
-    Agent -->|3. LLM 생성| Gemini[✨ Gemini 2.0<br/>Flash Thinking]
+    Agent -->|3. LLM 생성| Gemini[✨ Gemini 2.5<br/>Flash]
 
     VectorDB -.->|8,182 조문| Data[💾 법령 데이터]
     LawAPI -.->|실시간 조회| LawGov[🏛️ law.go.kr]
@@ -93,7 +93,7 @@ flowchart LR
 3. **Agent 실행** → LangGraph State Machine
 4. **Hybrid Search** → Supabase pgvector + BM25 + Reranker
 5. **Self-RAG 체크** → 예외 조항 적용 여부 판단
-6. **LLM 답변 생성** → Gemini 2.0 Flash (Thinking mode)
+6. **LLM 답변 생성** → Gemini 2.5 Flash
 7. **실시간 스트리밍** → SSE로 사용자에게 전달
 
 ---
@@ -215,7 +215,7 @@ if "다만" in 법령_내용 or "단서" in 법령_내용:
 | **Language** | Python | 3.12 |
 | **Framework** | FastAPI | 0.104+ |
 | **Agent** | LangGraph | 0.2.55 |
-| **LLM** | Google Gemini API | 2.0 Flash |
+| **LLM** | Google Gemini API | 2.5 Flash |
 | **Embedding** | multilingual-e5-large-instruct | 1024-dim |
 | **Reranker** | bge-reranker-v2-m3-ko | - |
 | **BM25** | rank-bm25 + Mecab | - |

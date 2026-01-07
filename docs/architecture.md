@@ -115,7 +115,7 @@ flowchart TD
 
     Answer --> StreamStart[SSE 스트리밍 시작]
 
-    StreamStart --> LLMStream[Gemini 2.0 Flash<br/>실시간 답변 생성]
+    StreamStart --> LLMStream[Gemini 2.5 Flash<br/>실시간 답변 생성]
 
     LLMStream --> ValidateResponse{응답 검증}
 
@@ -233,7 +233,7 @@ flowchart LR
 - **State**: AgentState (typed dict with messages, context, retrieved_docs)
 - **Nodes**: Agent Node, Tool Node, Answer Node
 - **Tools**: 3개 (vector_search, law_api_search, check_exceptions)
-- **LLM**: Gemini 2.0 Flash (Thinking mode)
+- **LLM**: Gemini 2.5 Flash
 
 **실행 흐름**:
 1. Agent가 Tool 선택 (LLM 판단)
@@ -300,8 +300,8 @@ CREATE TABLE conversations (
 ### 5.2 LLM 최적화
 - **스트리밍**: SSE로 실시간 답변 전송 (UX 개선)
 - **모델 선택**:
-  - 답변 생성: Gemini 2.0 Flash (Thinking) - 높은 품질
-  - Query Expansion: Gemini Flash Lite - 빠른 속도
+  - 답변 생성: Gemini 2.5 Flash - 빠르고 정확
+  - Query Expansion: Gemini 2.5 Flash Lite - 초경량
 - **프롬프트 캐싱**: 반복적인 시스템 프롬프트 캐싱 (비용 절감)
 
 ### 5.3 인프라 최적화

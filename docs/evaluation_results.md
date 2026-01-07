@@ -167,9 +167,9 @@ Recall@5 (45%) → Recall@10 (50%) = +5%p 향상
 - subqueries: 최대 4개
 
 **LLM**:
-- 답변 생성: Gemini 2.0 Flash (Thinking mode)
-- Query Expansion: Gemini Flash Lite
-- Evaluation: Gemini Flash Lite
+- 답변 생성: Gemini 2.5 Flash
+- Query Expansion: Gemini 2.5 Flash Lite
+- Evaluation: Gemini 2.5 Flash Lite
 
 ### 재현 방법
 
