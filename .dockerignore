@@ -33,8 +33,9 @@ DEBUG/
 # 백업
 temp_backup/
 
-# Streamlit
+# Streamlit (로컬 실험용)
 .streamlit/
+app.py
 
 # 환경변수 (보안)
 .env
