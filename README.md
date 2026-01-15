@@ -1,3 +1,15 @@
+---
+title: Lawbot-KR
+emoji: ⚖️
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: 4.44.0
+python_version: 3.12
+app_file: app.py
+pinned: false
+---
+
 # 한국 법령 챗봇 (Lawbot-KR) ⚖️
 
 <div align="center">
