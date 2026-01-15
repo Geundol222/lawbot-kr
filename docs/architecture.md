@@ -28,7 +28,7 @@ flowchart TB
 
     subgraph External["외부 API"]
         LawGov[법제처 Open API<br/>law.go.kr]
-        GeminiAPI[Google Gemini API<br/>2.0 Flash Thinking]
+        GeminiAPI[Google Gemini API<br/>2.5 Flash]
     end
 
     subgraph Monitoring["모니터링"]
@@ -338,21 +338,21 @@ CREATE TABLE conversations (
 ### Backend
 - **Language**: Python 3.12
 - **Framework**: FastAPI 0.104+
-- **Agent**: LangGraph 0.2.55
-- **LLM**: Google Gemini API (2.0 Flash)
-- **Embedding**: sentence-transformers (e5-large-instruct)
+- **Agent**: LangGraph 1.0.4
+- **LLM**: Google Gemini API (2.5 Flash)
+- **Embedding**: multilingual-e5-large-instruct
 - **Reranker**: bge-reranker-v2-m3-ko
-- **BM25**: rank-bm25 + Mecab
+- **BM25**: rank-bm25 + Kiwi (한국어 형태소 분석기)
 
 ### Frontend
-- **Framework**: Next.js 15.1
+- **Framework**: Next.js 16.0
 - **Language**: TypeScript
 - **UI**: React 19, Tailwind CSS
 - **State**: React Query, Context API
 
 ### Infrastructure
 - **Database**: Supabase (PostgreSQL + pgvector)
-- **Deployment**: Vercel (Frontend), Railway/Render (Backend)
+- **Deployment**: HuggingFace Spaces (Backend), Vercel (Frontend)
 - **Monitoring**: WandB
 - **Version Control**: Git + GitHub
 

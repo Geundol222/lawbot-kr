@@ -5,7 +5,7 @@
 [![CI](https://github.com/Geundol222/lawbot-kr/actions/workflows/ci.yml/badge.svg)](https://github.com/Geundol222/lawbot-kr/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Geundol222/lawbot-kr/actions/workflows/deploy.yml/badge.svg)](https://github.com/Geundol222/lawbot-kr/actions/workflows/deploy.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
-[![Next.js 15](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Agentic RAG + Hybrid Search + Self-RAG로 구현한 한국 법령 상담 AI**
@@ -34,19 +34,38 @@
 
 ## 📊 성능 평가
 
-### Ground Truth 정량 평가 결과 (2026-01-04)
+### 3모드 비교 실험 결과 (2026-01-15)
 
-| 메트릭 | 현재 성능 | 목표 | 개선 계획 |
-|--------|----------|------|----------|
-| **Recall@3** | 35% | 80% | +45%p |
-| **Recall@5** | 45% | 90% | +45%p |
-| **Recall@10** | 50% | 95% | +45%p |
-| **Citation F1** | 30% | 80% | +50%p |
-| **평균 응답 시간** | 14초 | 10초 | -4초 |
+#### 검색 품질 (q001~q010)
 
-> 📈 **개선 로드맵**: 직접 조문 질문 감지 (+20%p), 법률 용어 동의어 (+10%p), Query Decomposition (+10%p), Fine-tuning (+15%p)
+| 모드 | Recall@3 | Recall@5 | MRR | Citation F1 | 응답 시간 | 평가 질문 |
+|------|----------|----------|-----|-------------|----------|-----------|
+| **Vanilla** | 35% | 60% | 0.42 | 60% | **12초** | 10/10 |
+| **Current** | 35% | **65%** | 0.40 | 28% | 33초 | 10/10 |
+| **Self-RAG** | 39% | **67%** | **0.47** | 56% | 29초 | **9/10** |
+
+> Self-RAG는 q006 실행 오류로 9개 질문만 평가됨
+
+#### 답변 정확도 (q011~q015 예외 케이스)
+
+| 모드 | 정확률 | 평균 응답시간 | API 호출 |
+|------|--------|--------------|---------|
+| **Vanilla** | 80% | **14초** | 2회 |
+| **Current** | **100%** | 23초 | 3회 |
+| **Self-RAG** | 80% | 81초 | 5회 |
+
+> **최종 선택: Current 모드** - 유일하게 100% 정확도 달성
 >
-> 📝 [상세 평가 결과](docs/evaluation_results.md) | [개선 계획](docs/search_quality_improvement_plan.md)
+> 📝 [상세 평가 결과](docs/evaluation_results.md) | [예외 케이스 실험](docs/EXPERIMENT_RESULTS.md)
+
+### 핵심 인사이트
+
+> **"Self-RAG는 검색은 우수하나, 예외 케이스 정확도는 Current보다 낮다"**
+>
+> - 검색 품질 (Recall@5): Self-RAG (67%) > Current (65%)
+> - 예외 케이스 정확도: Current (100%) > Self-RAG (80%)
+> - **원인**: Self-RAG는 LLM이 "더 많은 검색"을 판단하지만, 법률의 원칙-예외 구조 이해 부족
+> - **결론**: 법률처럼 구조화된 도메인에서는 **도메인 특화 휴리스틱**이 LLM 자체 평가보다 정확
 
 ### 주요 메트릭 설명
 
@@ -112,15 +131,16 @@ A: 근로기준법 제56조는 연장·야간 및 휴일 근로에 대한 가산
 ① 사용자는 연장근로에 대하여는 통상임금의 100분의 50 이상을 가산하여...
 ```
 
-#### 2. 상황 설명 질문
+#### 2. 상황 설명 질문 (예외 조항 체크)
 ```
 Q: 5인 미만 사업장에서 해고 예고수당 받을 수 있어?
 
-A: 5인 미만 사업장은 근로기준법 제11조에 따라 일부 조항이 적용되지 않습니다.
+A: 네, 5인 미만 사업장이어도 해고 예고수당은 받을 수 있습니다.
 
-⚠️ 예외 조항 감지 (Self-RAG)
-근로기준법 제11조 단서: "상시 5명 이상의 근로자를 사용하는 사업장에 적용"
-→ 5인 미만 사업장은 해고 예고수당(제26조) 적용 제외
+⚠️ 예외 조항 감지 (check_exceptions_needed)
+- 근로기준법 제11조: "5인 이상 사업장에 적용"
+- 근로기준법 제26조(해고예고): 제11조 적용범위의 "예외" 조항
+→ 따라서 5인 미만 사업장에도 해고 예고수당은 적용됩니다.
 ```
 
 #### 3. 복잡한 법률 질문
@@ -174,21 +194,24 @@ Agent → check_exceptions_needed(법령)
 - 검색 대상: 8,182 조문
 - Recall@5: 45% → 90% (목표)
 
-### 3. Self-RAG (예외 조항 체크)
+### 3. 예외 조항 체크 (check_exceptions_needed)
 
 ```python
-# 자동 예외 감지
-if "다만" in 법령_내용 or "단서" in 법령_내용:
-    # LLM에게 예외 적용 여부 판단 요청
-    예외_적용 = check_exceptions_needed(법령, 사용자_질문)
-
-    if 예외_적용:
-        return "이 경우는 예외에 해당합니다. 해당 조항이 적용되지 않습니다."
+# 도메인 특화 휴리스틱으로 예외 조항 필요성 판단
+@tool
+def check_exceptions_needed(law_content: str, user_question: str) -> str:
+    """
+    판단 기준:
+    1. 사용자 질문 조건이 법령에 없음 (예: "5인 미만")
+    2. 법령이 다른 조문 참조 (예: "제X조에 따른")
+    3. 단서 조항 존재 (예: "단, ~인 경우 제외")
+    """
+    return {"needed": True, "articles_to_search": ["근로기준법 11"]}
 ```
 
-**효과**:
-- "5인 미만 사업장" 예외 케이스 정확 처리
-- "3개월 미만 근무자" 예외 자동 감지
+**Self-RAG와의 차이점**:
+- Self-RAG: LLM이 "더 검색할지" 자체 판단 → 법률에서 오판 가능
+- Current: 도메인 휴리스틱이 "예외 조항 필요 여부" 판단 → 정확도 100%
 
 ### 4. 조 단위 청킹 (Article-level Chunking)
 
@@ -214,7 +237,7 @@ if "다만" in 법령_내용 or "단서" in 법령_내용:
 |------|------|------|
 | **Language** | Python | 3.12 |
 | **Framework** | FastAPI | 0.104+ |
-| **Agent** | LangGraph | 0.2.55 |
+| **Agent** | LangGraph | 1.0.4 |
 | **LLM** | Google Gemini API | 2.5 Flash |
 | **Embedding** | multilingual-e5-large-instruct | 1024-dim |
 | **Reranker** | bge-reranker-v2-m3-ko | - |
@@ -224,7 +247,7 @@ if "다만" in 법령_내용 or "단서" in 법령_내용:
 ### Frontend
 | 분류 | 기술 | 버전 |
 |------|------|------|
-| **Framework** | Next.js | 15.1 |
+| **Framework** | Next.js | 16.0 |
 | **Language** | TypeScript | 5.x |
 | **UI** | React | 19 |
 | **Styling** | Tailwind CSS | 3.x |
@@ -234,7 +257,7 @@ if "다만" in 법령_내용 or "단서" in 법령_내용:
 | 분류 | 도구 | 용도 |
 |------|------|------|
 | **Database** | Supabase | PostgreSQL + pgvector |
-| **Deployment** | Vercel + Railway | Frontend + Backend |
+| **Deployment** | HuggingFace Spaces + Vercel | Backend + Frontend |
 | **Monitoring** | WandB | 실험 추적 & 성능 분석 |
 | **CI/CD** | GitHub Actions | 자동 테스트 & 배포 |
 
@@ -251,7 +274,7 @@ if "다만" in 법령_내용 or "단서" in 법령_내용:
 lawbot-kr/
 ├── frontend/                    # Next.js Frontend
 │   ├── src/
-│   │   ├── app/                # App Router (Next.js 15)
+│   │   ├── app/                # App Router (Next.js 16)
 │   │   ├── components/         # React 컴포넌트
 │   │   └── lib/                # API 클라이언트
 │   └── package.json
@@ -492,17 +515,29 @@ tail -f evaluation_recall10.log
 
 ## 🎯 주요 개선 사항
 
+### v2.2 (3모드 비교 실험) - 2026.01.15
+
+**실험 및 분석**:
+- ✅ 3모드(Vanilla/Current/Self-RAG) 정량 비교 실험
+- ✅ BM25 인덱스 경로 수정 (상대→절대)으로 Hybrid Search 안정화
+- ✅ Self-RAG 한계 실증 분석 (법률 도메인 부적합 규명)
+- ✅ Current 모드 100% 정확도 달성 (예외 케이스 5/5 정답)
+
+**문서화**:
+- ✅ 종합 실험 분석 문서 (evaluation_results.md)
+- ✅ 예외 케이스 상세 분석 (EXPERIMENT_RESULTS.md)
+- ✅ 핵심 인사이트 도출 ("도메인 휴리스틱 > Self-RAG")
+
 ### v2.1 (검색 품질 개선) - 2026.01.04
 
 **평가 시스템**:
-- ✅ Ground Truth 기반 정량 평가 (Recall@3/5/10, MRR, NDCG, Citation F1)
+- ✅ Ground Truth 기반 정량 평가 (Recall@3/5/10, MRR, Citation F1)
 - ✅ 조문 이름 정규화 ("민법 750" ↔ "민법 제750조" 매칭)
 - ✅ Recall@10 메트릭 추가 (평가 전용 top_k=10)
-- ✅ 검색 품질 개선 계획 수립 (3단계 Phase)
+- ✅ 검색 품질 개선 계획 수립
 
 **문서화**:
 - ✅ 시스템 아키텍처 다이어그램 (Mermaid)
-- ✅ 실험 결과 문서화 (evaluation_results.md)
 - ✅ 검색 품질 개선 계획 (search_quality_improvement_plan.md)
 
 ### v2.0 (모듈화 및 품질 강화) - 2025.12.11
@@ -623,11 +658,12 @@ MIT License
 
 - 🎯 **8,182개 법령 조문** 검색 시스템 구축
 - 🤖 **Agentic RAG** 자율 Agent 구현 (LangGraph)
-- 📊 **정량 평가** Ground Truth 기반 성능 측정 체계 구축
+- 📊 **3모드 비교 실험** Vanilla / Current / Self-RAG 정량 평가
 - 🔍 **Hybrid Search** Semantic + BM25 + Reranker 3단계 검색
-- 🧠 **Self-RAG** 예외 조항 자동 감지 및 적용
+- 🧠 **예외 조항 체크** check_exceptions_needed로 100% 정확도 달성
 - ⚡ **실시간 스트리밍** SSE 기반 답변 전송
 - 🚀 **CI/CD** GitHub Actions 자동 테스트 & 배포 파이프라인
+- 📈 **핵심 인사이트** "법률 AI는 Self-RAG보다 도메인 휴리스틱이 우수"
 
 ---
 
