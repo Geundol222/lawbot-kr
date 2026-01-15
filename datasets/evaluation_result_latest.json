@@ -1,0 +1,105 @@
+{
+  "timestamp": "2026-01-14 21:29:18",
+  "mode": "current",
+  "total_questions": 10,
+  "metrics": {
+    "recall_3": 0.0,
+    "recall_5": 0.0,
+    "recall_10": 0.0,
+    "mrr": 0.0,
+    "citation_f1": 0.283,
+    "avg_response_time_sec": 33.5
+  },
+  "individual_results": [
+    {
+      "id": "q001",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 1.0,
+      "response_time": 18.511247158050537
+    },
+    {
+      "id": "q002",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.0,
+      "response_time": 36.38898015022278
+    },
+    {
+      "id": "q003",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.5,
+      "response_time": 47.30144429206848
+    },
+    {
+      "id": "q004",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.6666666666666666,
+      "response_time": 36.61428928375244
+    },
+    {
+      "id": "q005",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.0,
+      "response_time": 35.756367206573486
+    },
+    {
+      "id": "q006",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.0,
+      "response_time": 56.64318490028381
+    },
+    {
+      "id": "q007",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.6666666666666666,
+      "response_time": 29.220637559890747
+    },
+    {
+      "id": "q008",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.0,
+      "response_time": 23.633065223693848
+    },
+    {
+      "id": "q009",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.0,
+      "response_time": 22.3253493309021
+    },
+    {
+      "id": "q010",
+      "recall_3": 0.0,
+      "recall_5": 0.0,
+      "recall_10": 0.0,
+      "mrr": 0.0,
+      "citation_f1": 0.0,
+      "response_time": 28.106337785720825
+    }
+  ]
+}

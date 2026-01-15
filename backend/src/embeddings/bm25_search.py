@@ -34,12 +34,15 @@ SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 class BM25Search:
     """BM25 키워드 검색 클래스"""
 
-    def __init__(self, cache_path="backend/src/embeddings/bm25_index.pkl"):
+    def __init__(self, cache_path=None):
         """
         Args:
-            cache_path: BM25 인덱스 캐시 파일 경로
+            cache_path: BM25 인덱스 캐시 파일 경로 (None이면 기본 경로 사용)
         """
-        self.cache_path = cache_path
+        # 기본 경로: 이 파일이 있는 디렉토리에 bm25_index.pkl
+        if cache_path is None:
+            cache_path = Path(__file__).resolve().parent / "bm25_index.pkl"
+        self.cache_path = str(cache_path)
         self.kiwi = Kiwi()
         self.bm25 = None
         self.documents: List[Dict] = []  # [{'law_name': ..., 'article': ..., 'content': ...}]
