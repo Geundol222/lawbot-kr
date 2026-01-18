@@ -174,67 +174,80 @@ class AgentStreaming:
             print(f"📝 법령 정보 수집 완료, 실시간 답변 생성 시작...")
 
             # 답변 생성용 메시지 필터링
-            # - 이전 대화 이력(Human + AI)은 유지 (맥락 이해를 위해)
-            # - Tool Calling 단계의 AI 메시지(tool_calls 포함)는 제거
-            # - "도구만 호출하세요" 시스템 메시지는 제거
+            # - 현재 질문(Human)과 검색 결과(Tool)만 사용
+            # - 이전 대화 맥락은 요약해서 전달
             filtered_messages = []
 
-            # 메모리에서 가져온 이전 대화 수 (Human + AI 쌍)
+            # 이전 대화 맥락 요약 (메모리에서)
+            if self.memory and self.memory.get_messages():
+                context_summary = []
+                memory_msgs = self.memory.get_messages()
+                for msg in memory_msgs[-4:]:  # 최근 2턴만
+                    msg_type = getattr(msg, "type", "")
+                    content = str(getattr(msg, "content", ""))[:200]  # 200자로 제한
+                    if msg_type == "human":
+                        context_summary.append(f"사용자: {content}")
+                    elif msg_type == "ai":
+                        context_summary.append(f"AI: {content}")
+
+                if context_summary:
+                    context_msg = HumanMessage(content=f"[이전 대화 맥락]\n" + "\n".join(context_summary))
+                    filtered_messages.append(context_msg)
+
+            # 현재 세션의 메시지에서 Human과 Tool만 추출
             memory_message_count = len(self.memory.get_messages()) if self.memory else 0
-
             for idx, msg in enumerate(messages):
-                msg_type = getattr(msg, "type", "")
-
-                # 1. 이전 대화 이력은 그대로 유지 (처음 memory_message_count개)
                 if idx < memory_message_count:
-                    filtered_messages.append(msg)
-                    continue
+                    continue  # 메모리 메시지는 위에서 요약으로 처리
 
-                # 2. 현재 세션의 메시지 필터링
-                if msg_type == "system":
-                    # "도구만 호출하세요" 시스템 메시지 제거
-                    continue
-                elif msg_type == "ai":
-                    # Tool 호출 요청 메시지는 제거
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        continue
-                    # Tool 호출이 없는 일반 AI 메시지는 유지
+                msg_type = getattr(msg, "type", "")
+                if msg_type == "human":
                     filtered_messages.append(msg)
-                elif msg_type in ("human", "tool"):
-                    # Human, Tool 메시지는 유지
+                elif msg_type == "tool":
+                    # Tool 결과만 추가 (검색 결과)
                     filtered_messages.append(msg)
 
             # 답변 생성용 프롬프트 추가
             answer_generation_prompt = SystemMessage(
-                content="""위 메시지에서 도구(tool)가 전달한 법령/판례 정보를 바탕으로 답변을 작성하세요.
+                content="""당신은 따뜻하고 전문적인 법률 상담 AI입니다. 검색된 법령 정보를 바탕으로 사용자 질문에 답변하세요.
 
-**이전 대화가 있다면 맥락을 고려하여 답변하세요:**
-- 사용자가 "그거", "그럼", "추가로" 등으로 이전 질문을 참조할 수 있습니다.
-- **이미 설명한 내용은 반복하지 마세요. 새로운 질문에만 집중하세요.**
-
-**중요: 답변 형식**
-- "근로기준법 제56조에 따르면..." 형식으로 법령을 자연스럽게 인용하세요
-- 법령 원문을 그대로 복사하지 말고, 핵심만 요약하세요
-- 신뢰도는 반드시 0.0 ~ 1.0 사이 숫자로 표시하세요
-
-**반드시 아래 형식을 따르세요:**
-
+**[필수 출력 형식]**
 ## 신뢰도
-[0.0 ~ 1.0 점수만 작성, 설명 불필요]
+(0.0~1.0 숫자만)
 
 ## 답변
-[법령을 자연스럽게 인용하며 답변 작성]
+(자연스러운 상담 톤으로 작성)
 
-**예시:**
-근로기준법 제56조에 따르면, 연장근로에 대해서는 통상임금의 50% 이상을 가산하여 지급해야 합니다.
-따라서 야간(오후 10시 ~ 오전 6시) 근무 시 통상임금 + 50% 가산수당을 받을 수 있습니다.
+**[작성 규칙]**
+1. 공감 표현: 첫 문장에서 사용자 상황에 공감 (예: "5인 미만 사업장이시군요, 걱정되시겠어요")
+2. 법령 인용: "~~법 제X조에 따르면" 형식으로 자연스럽게
+3. 실질적 조언: 구체적 행동 방법 제시
+4. 분량: 3~5문장, 300자 이내
 
-**작성 지침:**
-- 법령 조문을 자연스럽게 문장에 녹여서 작성 ("~~법 제XX조에 따르면...")
-- 법령 원문을 그대로 복사하지 말고 핵심만 요약
-- 답변은 3~5문장 이내로 간결하게
-- 판례가 있으면 간단히 언급 ("대법원 판례에 따르면...")
-- 논쟁 사항이 있으면 양측 근거를 간략히 병기"""
+**[이전 대화 맥락]**
+- [이전 대화 맥락] 태그가 있으면 참고하여 "그거", "추가로" 등 연계 질문 이해
+- 이미 설명한 내용은 반복하지 않고 새로운 정보 제공
+
+**[금지사항]**
+- search_vector_db() 같은 함수 호출 출력 금지
+- 마크다운 헤더(###, ####) 금지
+- 번호 나열(1. 2. 3. / I. II. III.) 금지
+- 법령 원문 그대로 복사 금지
+
+**[예시]**
+## 신뢰도
+0.95
+
+## 답변
+부당해고로 힘드시겠어요. 근로기준법 제28조에 따르면 해고 당한 날로부터 3개월 이내 노동위원회에 구제신청을 하실 수 있습니다. 별지 제3호 서식으로 신청서를 제출하시면 되며, 인정되면 원직복직이나 금전보상을 받으실 수 있어요.
+
+**[연계 질문 예시]**
+(이전: 부당해고 대처법 → 현재: "5인 미만 사업장인데도?")
+## 신뢰도
+0.90
+
+## 답변
+5인 미만 사업장이시군요. 안타깝게도 근로기준법 제11조에 따르면 5인 미만 사업장에는 부당해고 구제신청 규정이 적용되지 않습니다. 다만 민사소송을 통한 해고무효 확인이나, 고용노동부 진정을 통해 임금체불 등 다른 위반사항을 다툴 수 있어요."""
             )
 
             # 답변 생성 메시지 구성

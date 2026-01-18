@@ -394,3 +394,85 @@
 - ✅ 아키텍처 문서 (docs/architecture.md)
 - ✅ .gitignore 정리 (개인 문서 비공개)
 - ⏸️ 배포 (선택 사항)
+
+---
+
+## 2025.01.15
+
+### 1. ✅ BM25 인덱스 초기화 문제 해결
+- **문제**: HuggingFace 로그에서 "BM25 검색을 건너뜁니다" 발생, Hybrid Search 결과 `semantic 15개, bm25 0개`
+- **원인**: `api/main.py` startup 이벤트에서 임베딩 모델만 preload, BM25 인덱스는 lazy loading으로 첫 요청 시 빈 결과 반환
+- **해결**: `api/main.py`에 `preload_bm25_index(background=False)` 추가
+- **결과**: Hybrid Search 정상 작동 (`semantic 15개, bm25 15개`)
+
+### 2. ✅ 프론트엔드 스트리밍 안됨 문제 해결
+- **문제**: 백엔드에서 38개 청크 정상 생성되지만 프론트엔드에서 아무것도 수신 못함
+- **원인**: `api/main.py`의 `/chat/stream` 엔드포인트에서 SSE 이벤트 **이중 래핑**
+  - `agent_streaming.py`: `data: {"type": "answer_chunk", "text": "..."}\n\n` 형식으로 반환
+  - `api/main.py`: 다시 `data: {"chunk": "data: {...}", "done": false}\n\n`로 감싸서 전송
+  - 프론트엔드는 `{"type": "answer_chunk"}` 형식을 기대하므로 파싱 실패
+- **해결**: `api/main.py`에서 agent 출력을 그대로 전달하도록 수정
+  ```python
+  for sse_chunk in agent_instance.run_stream(request.question, session_id=session_id):
+      yield sse_chunk  # 이중 래핑 제거
+  ```
+- **결과**: 프론트엔드 스트리밍 정상 작동
+
+### 3. ✅ Gemini Thinking 모드로 인한 답변 중단 문제 해결
+- **문제**: `max_output_tokens=512` 설정했지만 답변이 한 문장에서 끊김
+  - 로그: `output_tokens: 508, output_token_details: {'reasoning': 487}, finish_reason: 'MAX_TOKENS'`
+  - 512 토큰 중 487개가 thinking(reasoning)에 소비, 실제 답변은 21토큰만
+- **원인**: Gemini 2.5 Flash의 thinking 모드가 기본 활성화, `max_output_tokens`에 thinking 토큰 포함
+- **해결**: `config.py`에 `thinking_budget=0` 추가 (LangChain 3.2.0에서 지원)
+  ```python
+  ChatGoogleGenerativeAI(
+      model="gemini-2.5-flash",
+      temperature=0.0,
+      thinking_budget=0,  # Thinking 모드 비활성화
+  )
+  ```
+- **결과**: reasoning 토큰 소비 없이 전체 토큰을 답변에 사용
+
+### 4. ✅ 연계 질문 시 tool 호출 문자열 출력 문제 해결
+- **문제**: 두 번째 질문("5인 미만 사업장인데도?")에서 답변 대신 `search_vector_db(query='5인 미만 사업장 부당해고')` 출력
+- **원인**: 답변 생성 메시지에 이전 AI 메시지(긴 마크다운 형식)와 빈 AI 메시지가 포함되어 LLM이 혼란
+- **해결**: `agent_streaming.py` 메시지 필터링 로직 전면 개편
+  - 이전 대화는 `[이전 대화 맥락]` 태그로 요약 전달 (200자 제한)
+  - 현재 세션에서 Human과 Tool 메시지만 추출
+  - AI 메시지 완전 제거 (tool_calls 여부 무관)
+  - 프롬프트에 "search_vector_db() 같은 함수 호출 출력 금지" 명시
+  - 연계 질문 fewshot 예시 추가
+- **결과**: 연계 질문에서도 정상적인 자연어 답변 생성
+
+### 5. ✅ max_tokens 제한 제거
+- **문제**: 복잡한 법률 질문(5인 미만 + 육아휴직 + 부당해고)에서 답변이 중간에 잘림
+  - "대한법률구조공단: 경제적 어려움이 있다면 대한법률구조공단의 무료 법" 에서 끊김
+- **원인**: `max_tokens=1024` 제한, 복잡한 질문은 여러 법령 인용 필요
+- **결정**: 법률 도메인 특성상 정확도가 속도보다 중요, 잘린 답변은 불완전한 정보 제공
+- **해결**: `max_tokens` 제한 제거, `thinking_budget=0`만 유지
+- **결과**: 답변 중단 없이 완전한 법률 정보 제공
+
+### 6. 📊 성능 현황
+- **평균 응답 시간**: 21.4초 (3개 질문 기준)
+- **병목 지점**: 벡터 검색 12초+ (서브쿼리 4개 × 15개 결과)
+- **판단**: 법률 도메인에서 정확도 > 속도
+  - 복잡한 법률 질문은 근로기준법 + 시행령 + 시행규칙 + 판례 교차 참조 필요
+  - "5인 미만 사업장"처럼 예외 조항이 많아 다양한 관점 검색 필수
+  - 틀린 법률 정보는 실제 피해로 이어질 수 있음
+- **포트폴리오 관점**: "왜 21초가 걸리는가"를 설명할 수 있으면 강점
+  - Hybrid Search (Semantic + BM25)
+  - Multi-query 전략
+  - 판례 연동
+
+### 7. 수정된 파일 목록
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/main.py` | BM25 preload 추가, SSE 이중 래핑 제거 |
+| `backend/src/config.py` | `thinking_budget=0` 추가, `max_tokens` 제거 |
+| `backend/src/agent_streaming.py` | 메시지 필터링 로직 개편, 프롬프트 개선 |
+| `frontend/.env.local` | 로컬 개발용 환경변수 설정 |
+
+### 8. 남은 작업
+- [ ] HuggingFace Spaces 배포 후 실제 환경 테스트
+- [ ] 프롬프트 튜닝 (300자 이내 권장사항 준수 여부 모니터링)
+- [ ] 로컬 테스트 자동화 스크립트 작성
