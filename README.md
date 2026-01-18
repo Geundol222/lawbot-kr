@@ -20,9 +20,24 @@ pinned: false
 
 **Agentic RAG + Hybrid Search + Self-RAG로 구현한 한국 법령 상담 AI**
 
-[🚀 데모 보기](#-데모) • [📊 성능 평가](#-성능-평가) • [🏗️ 아키텍처](#-시스템-아키텍처) • [📚 문서](#-문서)
+### 🌐 [Live Demo](https://lawbot-kr.vercel.app/)
+
+[📊 성능 평가](#-성능-평가) • [🏗️ 아키텍처](#-시스템-아키텍처) • [📚 문서](#-문서) • [🔮 추후 과제](#-추후-과제)
 
 </div>
+
+---
+
+## 🏆 핵심 성과
+
+- 🎯 **8,182개 법령 조문** 검색 시스템 구축
+- 🤖 **Agentic RAG** 자율 Agent 구현 (LangGraph)
+- 📊 **3모드 비교 실험** Vanilla / Current / Self-RAG 정량 평가
+- 🧠 **예외 조항 체크** 도메인 특화 휴리스틱으로 **100% 정확도** 달성
+- 📈 **핵심 인사이트** "법률 AI는 Self-RAG보다 도메인 휴리스틱이 우수"
+- 🔍 **Hybrid Search** Semantic + BM25 + Reranker 3단계 검색
+- ⚡ **실시간 스트리밍** SSE 기반 답변 전송
+- 🚀 **CI/CD** GitHub Actions 자동 테스트 & 배포 파이프라인
 
 ---
 
@@ -30,15 +45,12 @@ pinned: false
 
 **Lawbot-KR**은 **8,182개 법령 조문**을 벡터 검색하고, **LangGraph 기반 Agentic RAG**로 자율적으로 답변을 생성하는 법률 상담 챗봇입니다.
 
-### ✨ 핵심 특징
+### ✨ 기술 스택
 
-- 🤖 **Agentic RAG**: LLM이 자율적으로 Tool 선택 및 실행 (LangGraph)
-- 🔍 **Hybrid Search**: Semantic (E5-large) + BM25 + Reranker (BGE) 3단계 검색
-- 🧠 **Self-RAG**: 예외 조항 자동 감지 및 적용 ("다만", "단서" 등)
-- 💬 **Buffer Memory**: 세션 기반 대화 맥락 유지 (이전 대화 참조 가능)
-- ⚡ **실시간 스트리밍**: SSE 기반 답변 실시간 전송 (Gemini 2.5 Flash)
-- 📊 **정량 평가**: Ground Truth 기반 Recall@k, MRR, NDCG, Citation F1 측정
-- 🚀 **CI/CD**: GitHub Actions 자동 테스트 & 배포
+**Backend**: Python 3.12, FastAPI, LangGraph, Gemini 2.5 Flash
+**Frontend**: Next.js 16, React 19, TypeScript
+**Infrastructure**: Supabase (pgvector), HuggingFace Spaces, Vercel
+**Monitoring**: WandB, GitHub Actions
 
 ---
 
@@ -66,7 +78,7 @@ pinned: false
 
 > **최종 선택: Current 모드** - 유일하게 100% 정확도 달성
 >
-> 📝 [상세 평가 결과](docs/evaluation_results.md) | [예외 케이스 실험](docs/EXPERIMENT_RESULTS.md)
+> 📝 [상세 평가 결과](docs/evaluation_results.md)
 
 ### 핵심 인사이트
 
@@ -112,8 +124,6 @@ flowchart LR
     style VectorDB fill:#f0e1ff
     style Gemini fill:#ffe1e1
 ```
-
-> 📐 [상세 아키텍처](docs/architecture.md)
 
 ### 핵심 실행 흐름
 
@@ -166,7 +176,7 @@ A: 야간근로(오후 10시~오전 6시)에 대해서는 통상임금의 50% �
 
 ---
 
-## 💡 주요 기술 혁신
+## 💡 주요 구현 특징
 
 ### 1. Agentic RAG (LangGraph)
 
@@ -333,196 +343,6 @@ lawbot-kr/
 
 ---
 
-## 🚀 빠른 시작
-
-### 1. 환경 설정
-
-```bash
-# 저장소 클론
-git clone https://github.com/Geundol222/lawbot-kr.git
-cd lawbot-kr
-
-# Backend 설정
-cd backend
-pip install -r requirements.txt
-
-# Frontend 설정
-cd ../frontend
-npm install
-
-# 환경변수 설정
-cp .env.example .env
-# .env 파일 편집 (API 키 입력)
-```
-
-### 2. API 키 설정
-
-`.env` 파일:
-```bash
-# Google Gemini API
-GOOGLE_API_KEY=your_google_api_key_here
-
-# Supabase (Vector DB)
-SUPABASE_URL=your_supabase_url_here
-SUPABASE_ANON_KEY=your_supabase_anon_key_here
-
-# 법제처 Open API
-LAW_API_OC=your_law_api_key_here
-
-# WandB (선택사항)
-WANDB_ENABLED=false
-WANDB_API_KEY=your_wandb_key_here
-```
-
-### 3. Supabase 벡터 검색 설정
-
-[Supabase 대시보드](https://supabase.com) → SQL Editor:
-
-```sql
--- pgvector 확장 활성화
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- 벡터 검색 RPC 함수 생성
-CREATE OR REPLACE FUNCTION match_law_documents(
-  query_embedding vector(1024),
-  match_threshold float DEFAULT 0.0,
-  match_count int DEFAULT 10
-)
-RETURNS TABLE (
-  id bigint,
-  law_name text,
-  article text,
-  mst text,
-  content text,
-  similarity float
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RETURN QUERY
-  SELECT
-    law_cache.id,
-    law_cache.law_name::text,
-    law_cache.article::text,
-    law_cache.mst::text,
-    law_cache.content::text,
-    (1 - (law_cache.embedding <=> query_embedding))::float AS similarity
-  FROM law_cache
-  WHERE 1 - (law_cache.embedding <=> query_embedding) >= match_threshold
-  ORDER BY law_cache.embedding <=> query_embedding
-  LIMIT match_count;
-END;
-$$;
-
--- HNSW 인덱스 생성 (빠른 검색)
-CREATE INDEX idx_law_cache_embedding ON law_cache
-USING hnsw (embedding vector_cosine_ops);
-```
-
-### 4. 앱 실행
-
-```bash
-# Backend 실행
-cd backend
-uvicorn src.main:app --reload --port 8000
-
-# Frontend 실행 (새 터미널)
-cd frontend
-npm run dev
-
-# 브라우저에서 http://localhost:3000 열기
-```
-
-### 5. 테스트 실행
-
-```bash
-# 전체 테스트
-pytest
-
-# Unit 테스트만 (빠름)
-pytest -m unit
-
-# 커버리지 리포트
-pytest --cov=backend/src --cov-report=html
-```
-
----
-
-## 📊 WandB 모니터링
-
-### 로깅 전략 (v2.0)
-
-```
-Project: lawbot-kr
-  └─ Group: daily_20260104 (날짜별)
-      ├─ Run: session-abc123 (사용자 A)
-      │   ├─ Step 1: 질문1 → 답변1
-      │   ├─ Step 2: 질문2 → 답변2
-      │   └─ Step 3: 질문3 → 답변3
-      │
-      └─ Run: session-xyz789 (사용자 B)
-          ├─ Step 1: 질문1 → 답변1
-          └─ Step 2: 질문2 → 답변2
-```
-
-### 주요 메트릭
-
-**검색 성능**:
-- `vector_search/search_latency`: 검색 시간
-- `vector_search/top_similarity`: 최고 유사도
-- `vector_search/results_count`: 결과 수
-
-**Agent 실행**:
-- `agentic_rag/total_execution_time`: 총 실행 시간
-- `agentic_rag/tool_calls_count`: Tool 호출 횟수
-- `agentic_rag/total_tokens`: 토큰 사용량
-
-**평가 지표**:
-- `eval/current/recall_at_5`: Recall@5
-- `eval/current/citation_f1`: Citation F1
-- `eval/current/avg_response_time_ms`: 평균 응답 시간
-
----
-
-## 🧪 평가 & 실험
-
-### Ground Truth 평가 실행
-
-```bash
-# Recall@10 측정 모드로 평가
-python run_evaluation.py
-
-# 결과 확인
-tail -f evaluation_recall10.log
-```
-
-### 평가 데이터셋
-
-- **질문 수**: 15개 (상황별, 난이도별)
-- **카테고리**:
-  - `specific_article`: 직접 조문 질문 (5개)
-  - `situation`: 상황 설명 질문 (5개)
-  - `exception_scope`: 예외 조항 질문 (5개)
-
-### 평가 메트릭
-
-**검색 품질**:
-- Recall@3/5/10
-- MRR (Mean Reciprocal Rank)
-- NDCG@3 (Normalized Discounted Cumulative Gain)
-
-**답변 품질**:
-- Citation F1 (인용 정확도)
-- Faithfulness (검색 결과 충실도)
-- Relevance (질문 관련성)
-
-**비용 & 성능**:
-- 응답 시간 (ms)
-- 토큰 사용량
-- API 호출 횟수
-
----
-
 ## 🎯 주요 개선 사항
 
 ### v2.2 (3모드 비교 실험) - 2026.01.15
@@ -577,65 +397,28 @@ tail -f evaluation_recall10.log
 
 ---
 
+## 🔮 추후 과제
+
+### 검색 품질 개선
+
+**핵심 이슈**:
+- DB에 조문이 존재하나 검색 실패 (주택임대차보호법 6조, 자동차손해배상법 3조)
+- 원인: 임베딩 시 제목 과의존 + 일상 용어 vs 법률 용어 갭
+- 별표 문서 미처리 (근로기준법 별표 1 등)
+
+**개선 계획**:
+1. **임베딩 방식 개선** - 조문 내용을 우선시하여 시맨틱 검색 정확도 향상
+2. **직접 조문 질문 감지** - 정규식으로 "○○법 제XX조" 패턴 감지 후 DB 직접 조회
+3. **Citation F1 개선** - 답변에 조문 명시 강제
+4. **법률 용어 동의어 DB** - API 제공 문서 활용하여 일상-법률 용어 매핑 테이블 구축
+5. **별표 문서 처리** - cRAG 방식 웹 검색 또는 수동 수집 (장기)
+
+---
+
 ## 📚 문서
 
-- [📐 시스템 아키텍처](docs/architecture.md)
 - [📊 평가 결과](docs/evaluation_results.md)
 - [🔍 검색 품질 개선 계획](docs/search_quality_improvement_plan.md)
-- [📈 WandB 로깅 전략](docs/WANDB_LOGGING_STRATEGY.md)
-
----
-
-## 🔧 문제 해결
-
-### Supabase RPC 함수 오류
-
-**증상**:
-```
-⚠️ RPC 호출 실패, 폴백 방식 사용
-```
-
-**해결**: 위의 "Supabase 벡터 검색 설정" SQL 실행
-
-### 벡터 검색 느림
-
-**원인**: RPC 함수 미설정 → Fallback 모드 (전체 테이블 스캔)
-
-**해결**: HNSW 인덱스 생성 (위 참고)
-
-### WandB 로깅 비활성화
-
-```bash
-# .env 파일
-WANDB_ENABLED=false
-```
-
----
-
-## 🌿 브랜치 전략
-
-```
-main (프로덕션)
-  ↑
-  └─ develop (개발)
-      ↑
-      ├─ feature/search-optimization
-      └─ fix/citation-accuracy
-```
-
-| 브랜치 | CI 테스트 | CD 배포 | 용도 |
-|--------|----------|---------|------|
-| `main` | ✅ | ✅ (Vercel + Railway) | 프로덕션 |
-| `develop` | ✅ | ❌ | 개발 & 통합 |
-| `feature/*` | ✅ (PR시) | ❌ | 기능 개발 |
-
----
-
-## ⚠️ 주의사항
-
-- 본 챗봇은 **법률 정보 제공 목적**이며, 정식 법률 자문이 아닙니다.
-- 중요한 법률 문제는 반드시 **전문 변호사**와 상담하세요.
-- API 키는 `.env` 파일에 저장하고 Git에 커밋하지 마세요.
 
 ---
 
@@ -646,34 +429,9 @@ main (프로덕션)
 
 ---
 
-## 🤝 기여
-
-버그 리포트, 기능 제안, Pull Request 환영합니다!
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
 ## 📝 라이선스
 
 MIT License
-
----
-
-## 🏆 성과 요약
-
-- 🎯 **8,182개 법령 조문** 검색 시스템 구축
-- 🤖 **Agentic RAG** 자율 Agent 구현 (LangGraph)
-- 📊 **3모드 비교 실험** Vanilla / Current / Self-RAG 정량 평가
-- 🔍 **Hybrid Search** Semantic + BM25 + Reranker 3단계 검색
-- 🧠 **예외 조항 체크** check_exceptions_needed로 100% 정확도 달성
-- ⚡ **실시간 스트리밍** SSE 기반 답변 전송
-- 🚀 **CI/CD** GitHub Actions 자동 테스트 & 배포 파이프라인
-- 📈 **핵심 인사이트** "법률 AI는 Self-RAG보다 도메인 휴리스틱이 우수"
 
 ---
 
