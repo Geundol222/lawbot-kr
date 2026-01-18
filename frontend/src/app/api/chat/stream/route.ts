@@ -33,12 +33,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // SSE 스트림을 그대로 전달
-    return new Response(response.body, {
+    // SSE 스트림을 즉시 전달 (버퍼링 방지)
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          controller.close();
+          return;
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // 청크를 즉시 전송 (버퍼링 없이)
+            controller.enqueue(value);
+          }
+        } catch (error) {
+          console.error('[SSE Proxy] Stream error:', error);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no', // Nginx 버퍼링 방지
       },
     });
 
