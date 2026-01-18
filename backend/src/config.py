@@ -91,7 +91,8 @@ def get_llm(model: str = "flash"):
 
         _llm_instances[model] = ChatGoogleGenerativeAI(
             model=model_map.get(model, "gemini-2.5-flash"),
-            temperature=0.0
+            temperature=0.0,
+            thinking_budget=0,  # Thinking 모드 비활성화 (reasoning 토큰 소비 방지)
         )
 
     return _llm_instances[model]

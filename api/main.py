@@ -211,23 +211,19 @@ async def chat_stream(request: ChatRequest, http_request: Request, http_response
     session_id = request.session_id or device_id
 
     async def event_generator():
-        """SSE 이벤트 생성"""
+        """SSE 이벤트 생성 - agent_streaming.py의 SSE 출력을 그대로 전달"""
         try:
             agent_instance = get_agent()
 
-            # 스트리밍 시작
-            for chunk in agent_instance.run_stream(request.question, session_id=session_id):
-                # SSE 형식으로 전송
-                yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
-
-            # 완료 신호
-            yield f"data: {json.dumps({'done': True, 'session_id': session_id})}\n\n"
+            # agent_streaming.py가 이미 "data: {...}\n\n" 형식으로 반환하므로 그대로 전달
+            for sse_chunk in agent_instance.run_stream(request.question, session_id=session_id):
+                yield sse_chunk
 
         except Exception as e:
             # 에러 전송
             error_data = {
-                'error': str(e),
-                'done': True
+                'type': 'error',
+                'message': str(e)
             }
             yield f"data: {json.dumps(error_data)}\n\n"
 
