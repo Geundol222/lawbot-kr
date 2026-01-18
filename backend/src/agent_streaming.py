@@ -175,10 +175,11 @@ class AgentStreaming:
 
             # 답변 생성용 메시지 필터링
             # - 현재 질문(Human)과 검색 결과(Tool)만 사용
-            # - 이전 대화 맥락은 요약해서 전달
+            # - 이전 대화 맥락은 SystemMessage로 전달 (출력되지 않도록)
             filtered_messages = []
+            context_system_msg = None
 
-            # 이전 대화 맥락 요약 (메모리에서)
+            # 이전 대화 맥락 요약 (메모리에서) - SystemMessage로 전달
             if self.memory and self.memory.get_messages():
                 context_summary = []
                 memory_msgs = self.memory.get_messages()
@@ -191,8 +192,10 @@ class AgentStreaming:
                         context_summary.append(f"AI: {content}")
 
                 if context_summary:
-                    context_msg = HumanMessage(content=f"[이전 대화 맥락]\n" + "\n".join(context_summary))
-                    filtered_messages.append(context_msg)
+                    # SystemMessage로 전달하여 출력되지 않도록 함
+                    context_system_msg = SystemMessage(
+                        content=f"[참고: 이전 대화 맥락 - 이 내용을 출력하지 말고 맥락 이해에만 사용하세요]\n" + "\n".join(context_summary)
+                    )
 
             # 현재 세션의 메시지에서 Human과 Tool만 추출
             memory_message_count = len(self.memory.get_messages()) if self.memory else 0
@@ -263,8 +266,12 @@ class AgentStreaming:
 5인 미만 사업장이시군요. 안타깝게도 근로기준법 제11조에 따르면 상시 5인 미만 사업장에는 부당해고 구제신청 규정(제28조)이 적용되지 않습니다. 다만 대안이 있습니다. 민사소송으로 해고무효 확인을 받거나, 임금체불·퇴직금 미지급 등 다른 위반사항이 있다면 고용노동부에 진정을 제기할 수 있습니다. 또한 해고 사유가 차별(성별, 나이 등)에 해당하면 국가인권위원회에 진정도 가능합니다."""
             )
 
-            # 답변 생성 메시지 구성
-            answer_messages = filtered_messages + [answer_generation_prompt]
+            # 답변 생성 메시지 구성 (이전 맥락이 있으면 SystemMessage로 추가)
+            answer_messages = []
+            if context_system_msg:
+                answer_messages.append(context_system_msg)
+            answer_messages.extend(filtered_messages)
+            answer_messages.append(answer_generation_prompt)
 
             # 디버깅: 답변 생성에 사용되는 메시지 확인
             print(f"\n🔍 [DEBUG] 답변 생성용 메시지 개수: {len(answer_messages)}")
