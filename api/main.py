@@ -58,6 +58,13 @@ async def startup_event():
     """FastAPI 앱 시작 시 실행"""
     print("🚀 FastAPI 앱 시작 - 임베딩 모델 로딩 시작...")
     preload_embedding_model()
+    print("✅ 임베딩 모델 로딩 완료!")
+
+    # BM25 인덱스 preload
+    print("🔍 BM25 인덱스 로딩 시작...")
+    from src.embeddings.bm25_search import preload_bm25_index
+    preload_bm25_index(background=False)
+    print("✅ BM25 인덱스 로딩 완료!")
 
 # Request/Response 모델
 class ChatRequest(BaseModel):
