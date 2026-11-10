@@ -20,7 +20,7 @@ pinned: false
 
 **Agentic RAG + Hybrid Search + Self-RAG로 구현한 한국 법령 상담 AI**
 
-### 🌐 [Live Demo](https://lawbot-kr.vercel.app/)
+🌐 라이브 데모는 운영 중단 (무료 DB·Hugging Face Space 연결이 자주 끊겨 유지하지 않음)
 
 [📊 성능 평가](#-성능-평가) • [🏗️ 아키텍처](#-시스템-아키텍처) • [📚 문서](#-문서) • [🔮 추후 과제](#-추후-과제)
 
@@ -33,7 +33,7 @@ pinned: false
 - 🎯 **8,182개 법령 조문** 검색 시스템 구축
 - 🤖 **Agentic RAG** 자율 Agent 구현 (LangGraph)
 - 📊 **3모드 비교 실험** Vanilla / Current / Self-RAG 정량 평가
-- 🧠 **예외 조항 체크** 도메인 특화 휴리스틱으로 **100% 정확도** 달성
+- 🧠 **예외 조항 체크** 도메인 특화 휴리스틱으로 예외 케이스 5문항 모두 정답 (Vanilla·Self-RAG는 4문항)
 - 📈 **핵심 인사이트** "법률 AI는 Self-RAG보다 도메인 휴리스틱이 우수"
 - 🔍 **Hybrid Search** Semantic + BM25 + Reranker 3단계 검색
 - ⚡ **실시간 스트리밍** SSE 기반 답변 전송
@@ -76,7 +76,7 @@ pinned: false
 | **Current** | **100%** | 23초 | 3회 |
 | **Self-RAG** | 80% | 81초 | 5회 |
 
-> **최종 선택: Current 모드** - 유일하게 100% 정확도 달성
+> **최종 선택: Current 모드** - 예외 케이스 5문항을 모두 맞힌 유일한 모드
 >
 > 📝 [상세 평가 결과](docs/evaluation_results.md)
 
@@ -137,7 +137,7 @@ flowchart LR
 
 ---
 
-## 🚀 데모
+## 💬 사용 예시
 
 ### 질문 예시
 
