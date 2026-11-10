@@ -1,9 +1,9 @@
 name: CD - Auto Deploy
 
+# 라이브 데모 운영 중단으로 자동 배포를 끄고 수동 실행만 남김.
+# Vercel(Frontend)은 Vercel 프로젝트의 Git 연동이 배포하므로 여기서는 하지 않음.
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:  # 수동 실행 가능
+  workflow_dispatch:  # 수동 실행
 
 jobs:
   deploy-huggingface:
@@ -39,52 +39,10 @@ jobs:
 
           View your app at: https://huggingface.co/spaces/${{ secrets.HF_SPACE_NAME }}
 
-  deploy-vercel:
-    name: Deploy to Vercel (Frontend)
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-
-    - name: Install Vercel CLI
-      run: npm install --global vercel@latest
-
-    - name: Pull Vercel Environment Information
-      run: |
-        cd frontend
-        vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-
-    - name: Build Project Artifacts
-      run: |
-        cd frontend
-        vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-    - name: Deploy to Vercel
-      run: |
-        cd frontend
-        vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-    - name: Comment on commit
-      uses: peter-evans/commit-comment@v3
-      with:
-        body: |
-          ✨ **Deployed to Vercel**
-
-          Your frontend is live!
-
   notify:
     name: Deployment Notification
     runs-on: ubuntu-latest
-    needs: [deploy-huggingface, deploy-vercel]
+    needs: [deploy-huggingface]
     if: always()
 
     steps:
@@ -92,4 +50,3 @@ jobs:
       run: |
         echo "🎉 Deployment workflow completed!"
         echo "HuggingFace Status: ${{ needs.deploy-huggingface.result }}"
-        echo "Vercel Status: ${{ needs.deploy-vercel.result }}"
