@@ -432,13 +432,3 @@ lawbot-kr/
 ## 📝 라이선스
 
 MIT License
-
----
-
-<div align="center">
-
-**Made with ❤️ by [Geundol222](https://github.com/Geundol222)**
-
-[⬆ Back to top](#한국-법령-챗봇-lawbot-kr-️)
-
-</div>
